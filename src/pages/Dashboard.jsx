@@ -141,7 +141,10 @@ const Dashboard = ({ onAction }) => {
           <div className="wallet-panel-glow" />
           <div className="wallet-row">
             <span className="eyebrow">Business wallet balance</span>
-            <span className="growth-chip"><TrendingUp size={13} /> live ledger</span>
+            <div style={{display:'flex',alignItems:'center',gap:8}}>
+              <span className="growth-chip"><TrendingUp size={13} /> live ledger</span>
+              <button className="icon-shell" onClick={() => setSheet('capital_in')} style={{width:34,height:34,borderRadius:999}}><Plus size={18}/></button>
+            </div>
           </div>
           <div className="wallet-amount-row">
             <h2>{currency(walletStats.balance)}</h2>
