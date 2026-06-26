@@ -44,23 +44,49 @@ const Reports = () => {
   const unrecovered = accounts.filter((a)=>a.revenue < (a.purchaseCost + a.psnDeposits));
 
   const downloadReport = () => {
-    const data = {
-      period,
-      generatedAt: new Date().toISOString(),
-      summary: {
-        revenue: periodStats.revenue,
-        profit: periodStats.profit,
-        totalInvested: walletStats.totalInvested,
-      },
-      topGames: topGames.map(([name, total]) => ({ game: name, revenue: total })),
-      resetSchedule: resetList.map((a) => ({ email: a.email, nextDeactivation: a.nextDeactivation })),
-      unrecoveredAccounts: unrecovered.length,
-    };
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const lines = [];
+    lines.push('═══════════════════════════════════════');
+    lines.push('  PSN MANAGER — BUSINESS REPORT');
+    lines.push('═══════════════════════════════════════');
+    lines.push(`  Period:        ${period}`);
+    lines.push(`  Generated:     ${new Date().toLocaleString()}`);
+    lines.push('───────────────────────────────────────');
+    lines.push('  SUMMARY');
+    lines.push('───────────────────────────────────────');
+    lines.push(`  Revenue:       ${money(periodStats.revenue)}`);
+    lines.push(`  Profit:        ${money(periodStats.profit)}`);
+    lines.push(`  Invested:      ${money(walletStats.totalInvested)}`);
+    lines.push(`  Unrecovered:   ${unrecovered.length} account(s)`);
+    lines.push('');
+    lines.push('───────────────────────────────────────');
+    lines.push('  TOP GAMES');
+    lines.push('───────────────────────────────────────');
+    if (topGames.length) {
+      topGames.forEach(([name, total], i) => {
+        lines.push(`  ${i + 1}. ${name.padEnd(35)} ${money(total)}`);
+      });
+    } else {
+      lines.push('  (no sales yet)');
+    }
+    lines.push('');
+    lines.push('───────────────────────────────────────');
+    lines.push('  RESET SCHEDULE');
+    lines.push('───────────────────────────────────────');
+    if (resetList.length) {
+      resetList.forEach((a) => {
+        lines.push(`  ${a.email.padEnd(35)} ${a.nextDeactivation}`);
+      });
+    } else {
+      lines.push('  (no reset dates)');
+    }
+    lines.push('');
+    lines.push('═══════════════════════════════════════');
+    const text = lines.join('\n');
+    const blob = new Blob([text], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `psn-report-${period.replace(' ', '-')}-${new Date().toISOString().slice(0, 10)}.json`;
+    a.download = `psn-report-${period.replace(' ', '-')}-${new Date().toISOString().slice(0, 10)}.txt`;
     a.click();
     URL.revokeObjectURL(url);
   };
