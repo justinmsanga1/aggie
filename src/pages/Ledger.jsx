@@ -47,8 +47,6 @@ const Ledger = () => {
 
   return (
     <div className="nexus-page ledger-page fade-in">
-      <header className="page-top"></header>
-
       <section className="ledger-balance-card">
         <span>Business wallet</span>
         <strong>{money(walletStats.balance)}</strong>
@@ -65,6 +63,7 @@ const Ledger = () => {
           {['all', 'capital_in', 'account_purchase', 'psn_deposit', 'slot_sale', 'withdrawal', 'expense', 'adjustment'].map((type) => (
             <button key={type} className={activeFilter === type ? 'active' : ''} onClick={() => setActiveFilter(type)}>{type === 'all' ? 'All' : type.replace('_', ' ')}</button>
           ))}
+          <button className="icon-shell" style={{marginLeft:'auto'}} onClick={() => setIsSheetOpen(true)}><Plus size={18}/></button>
         </div>
       </section>
 
@@ -88,8 +87,6 @@ const Ledger = () => {
           </button>
         )}
       </section>
-
-      <div className="page-fab"><button className="icon-shell" onClick={() => setIsSheetOpen(true)}><Plus size={21} /></button></div>
 
       <Sheet isOpen={isSheetOpen} onClose={() => setIsSheetOpen(false)} title="New Money Record">
         <form onSubmit={submit}>
