@@ -13,7 +13,7 @@ export const GAMES = [
 ];
 
 export const ADMINS = [
-  { id: 'adm1', name: 'Alexander', role: 'Super Admin' },
+  { id: 'adm1', name: 'Msaka', role: 'Super Admin' },
   { id: 'adm2', name: 'Dimitri', role: 'Super Admin' },
 ];
 
@@ -83,9 +83,9 @@ export const INITIAL_ACCOUNTS = [
 ];
 
 export const INITIAL_TRANSACTIONS = [
-  { id: 't1', type: 'capital_in', amount: 5000.00, date: '2026-04-01', note: 'Q2 Business Injection', admin: 'Alexander' },
-  { id: 't2', type: 'withdrawal', amount: 500.00, date: '2026-05-20', note: 'Monthly profit withdrawal', admin: 'Alexander' },
+  { id: 't1', type: 'capital_in', amount: 5000.00, date: '2026-04-01', note: 'Q2 Business Injection', admin: 'Msaka' },
+  { id: 't2', type: 'withdrawal', amount: 500.00, date: '2026-05-20', note: 'Monthly profit withdrawal', admin: 'Msaka' },
   { id: 't3', type: 'expense', amount: 15.00, date: '2026-06-01', note: 'Domain renewal', admin: 'Dimitri' },
-  { id: 't4', type: 'adjustment', amount: 50.00, date: '2026-06-05', note: 'Inventory reconciliation', admin: 'Alexander' },
+  { id: 't4', type: 'adjustment', amount: 50.00, date: '2026-06-05', note: 'Inventory reconciliation', admin: 'Msaka' },
 ];
 // Note: Slot sales will be generated dynamically or manually in the prototype
