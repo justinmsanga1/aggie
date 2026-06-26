@@ -49,7 +49,7 @@ const Ledger = () => {
     <div className="nexus-page ledger-page fade-in">
       <header className="page-top">
         <div>
-          <span className="eyebrow">Business money</span>
+          
           <h1>Money & Ledger</h1>
           <p>Every cash movement in one clean trail.</p>
         </div>
