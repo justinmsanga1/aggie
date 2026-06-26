@@ -10,6 +10,7 @@ const AccountDetails = ({ id, accountId, onBack }) => {
   const selectedId = id || accountId;
   const { accounts, games, transactions, getAccountStats, addTransaction, recordGamePurchase, markDeactivated, updateAccount } = useStore();
   const [sheet, setSheet] = useState(null);
+  const [busy, setBusy] = useState(false);
   const account = accounts.find((item) => item.id === selectedId);
   if (!account) return <div className="details-page"><button className="icon-shell" onClick={onBack}><ArrowLeft size={20}/></button><p>Account not found.</p></div>;
   const stats = getAccountStats(account);
@@ -31,12 +32,43 @@ const AccountDetails = ({ id, accountId, onBack }) => {
       alert(error.message || 'Could not save deposit.');
     }
   };
-  const buyGame = (event) => { event.preventDefault(); const form = new FormData(event.target); recordGamePurchase(account.id, form.get('gameId'), parseFloat(form.get('cost'))); setSheet(null); };
+  const buyGame = async (event) => {
+    event.preventDefault();
+    try {
+      const form = new FormData(event.target);
+      await recordGamePurchase(account.id, form.get('gameId'), parseFloat(form.get('cost')));
+      setSheet(null);
+    } catch (error) {
+      alert(error.message || 'Could not record game purchase.');
+    }
+  };
+  const deactivate = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await markDeactivated(account.id);
+    } catch (error) {
+      alert(error.message || 'Could not deactivate account.');
+    } finally {
+      setBusy(false);
+    }
+  };
+  const archive = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await updateAccount(account.id, { condition: 'archived', status: 'archived' });
+    } catch (error) {
+      alert(error.message || 'Could not archive account.');
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return <div className="nexus-page details-page fade-in">
     <header className="details-top"><button className="icon-shell" onClick={onBack}><ArrowLeft size={20}/></button><div><span className="eyebrow">Account profile</span><h1>{account.email}</h1><p>{account.region} - {account.condition}</p></div><button className="icon-shell"><Copy size={19}/></button></header>
     <section className="detail-hero"><div className="detail-meta"><span><Shield size={14}/>{account.status}</span><span><Globe2 size={14}/>{account.region}</span><span><Clock3 size={14}/>{account.nextDeactivation || 'No reset date'}</span></div><div className="detail-money"><div><small>Profit / loss</small><b className={stats.profit>=0?'positive':'negative'}>{money(stats.profit)}</b></div><div><small>Total invested</small><b>{money(stats.totalInvested)}</b></div><div><small>Revenue</small><b>{money(account.revenue)}</b></div><div><small>PSN left</small><b>{money(stats.psnBalance)}</b></div></div></section>
-    <section className="detail-actions"><button onClick={()=>setSheet('deposit')}><Wallet size={18}/>Deposit</button><button onClick={()=>setSheet('game')}><Gamepad2 size={18}/>Buy Game</button><button onClick={()=>markDeactivated(account.id)}><RotateCcw size={18}/>Deactivate</button><button onClick={()=>updateAccount(account.id, { condition: 'archived', status: 'archived' })}><Archive size={18}/>Archive</button></section>
+    <section className="detail-actions"><button onClick={()=>setSheet('deposit')}><Wallet size={18}/>Deposit</button><button onClick={()=>setSheet('game')}><Gamepad2 size={18}/>Buy Game</button><button onClick={deactivate}><RotateCcw size={18}/>Deactivate</button><button onClick={archive}><Archive size={18}/>Archive</button></section>
     <section className="detail-card"><div className="section-head"><div><h3>Slot Map</h3><p>Normal and reset state by console</p></div></div><div className="deep-slots"><SlotBlock title="PS4" slots={account.slots.ps4}/><SlotBlock title="PS5" slots={account.slots.ps5}/></div></section>
     <section className="detail-card"><div className="section-head"><div><h3>Games</h3><p>Games attached to this account</p></div><button onClick={()=>setSheet('game')}><Plus size={15}/>Add</button></div><div className="detail-games">{gameNames.map((game)=><div key={game.id}><Gamepad2 size={18}/><span>{game.name}</span><b>{money(game.price)}</b></div>)}</div></section>
     <section className="detail-card"><div className="section-head"><div><h3>Account Ledger</h3><p>Account-specific money and sales timeline</p></div></div><div className="detail-timeline">{accountTx.length?accountTx.map((tx)=><div key={tx.id}><span>{tx.date}</span><strong>{tx.note}</strong><b className={['slot_sale','psn_deposit'].includes(tx.type)?'positive':'negative'}>{money(tx.amount)}</b></div>):<p className="empty-line">No account transactions yet.</p>}</div></section>
