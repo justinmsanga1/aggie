@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Search, Plus, ChevronRight, X } from 'lucide-react';
+import { Search, Plus, ChevronRight, ChevronDown, ChevronUp, X } from 'lucide-react';
 import { useStore } from '../context/StoreContext';
 import './Accounts.css';
 
@@ -13,6 +13,7 @@ const Accounts = ({ onViewDetails }) => {
   const [selectedGames, setSelectedGames] = useState([]);
   const [newGameNames, setNewGameNames] = useState(['']);
   const [saving, setSaving] = useState(false);
+  const [showAll, setShowAll] = useState(false);
   const openAddAccount = () => setOpen(true);
 
   const enriched = useMemo(() => accounts.map((account) => {
@@ -39,6 +40,8 @@ const Accounts = ({ onViewDetails }) => {
       (filter === 'soldout' && soldOut);
     return byQuery && byFilter;
   });
+
+  const visible = showAll ? filtered : filtered.slice(0, 5);
 
   const toggleGame = (gameId) => {
     setSelectedGames((prev) => prev.includes(gameId) ? prev.filter((id) => id !== gameId) : [...prev, gameId]);
@@ -93,7 +96,7 @@ const Accounts = ({ onViewDetails }) => {
       <section className="accounts-list">
         {filtered.length === 0 ? (
           <p className="empty-line">No accounts yet. Tap Buy / Add Account to create your first one.</p>
-        ) : filtered.map(({ account, stats, names }) => (
+        ) : visible.map(({ account, stats, names }) => (
           <article key={account.id} className="account-card" onClick={() => onViewDetails(account.id)}>
             <div className="account-head"><div><strong>{account.email}</strong><span>{account.region} - {account.condition}</span></div><ChevronRight size={18}/></div>
             <div className="game-chips">{names.slice(0,3).map((name)=><span key={name}>{name}</span>)}{names.length>3 && <span>+{names.length-3}</span>}</div>
@@ -101,6 +104,11 @@ const Accounts = ({ onViewDetails }) => {
             <div className="account-money"><div><small>Invested</small><b>{money(stats.totalInvested)}</b></div><div><small>Revenue</small><b>{money(account.revenue)}</b></div><div><small>P/L</small><b className={stats.profit>=0?'positive':'negative'}>{money(stats.profit)}</b></div><div><small>PSN left</small><b>{money(stats.psnBalance)}</b></div></div>
           </article>
         ))}
+        {filtered.length > 5 && (
+          <button className="ledger-toggle" onClick={() => setShowAll((s) => !s)}>
+            {showAll ? <><ChevronUp size={16} /> Show Less</> : <><ChevronDown size={16} /> Show More ({filtered.length})</>}
+          </button>
+        )}
       </section>
     </div>
   );
