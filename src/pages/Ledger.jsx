@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Search, Plus, ArrowUpCircle, ArrowDownCircle, MinusCircle, Wallet, Receipt, SlidersHorizontal } from 'lucide-react';
+import { Search, Plus, ArrowUpCircle, ArrowDownCircle, MinusCircle, Wallet, Receipt, SlidersHorizontal, ChevronDown, ChevronUp } from 'lucide-react';
 import { useStore } from '../context/StoreContext';
 import Sheet from '../components/Sheet';
 import './Ledger.css';
@@ -13,12 +13,15 @@ const Ledger = () => {
   const [query, setQuery] = useState('');
   const [isSheetOpen, setIsSheetOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [showAll, setShowAll] = useState(false);
 
   const filtered = transactions.filter((tx) => {
     const byType = activeFilter === 'all' || tx.type === activeFilter;
     const haystack = `${tx.note} ${tx.admin} ${tx.type}`.toLowerCase();
     return byType && haystack.includes(query.toLowerCase());
   });
+
+  const visible = showAll ? filtered : filtered.slice(0, 5);
 
   const submit = async (event) => {
     event.preventDefault();
@@ -73,7 +76,7 @@ const Ledger = () => {
       </section>
 
       <section className="ledger-list">
-        {filtered.map((tx) => {
+        {visible.map((tx) => {
           const isPositive = positiveTypes.includes(tx.type);
           return (
             <article key={tx.id} className="ledger-row">
@@ -86,6 +89,11 @@ const Ledger = () => {
             </article>
           );
         })}
+        {filtered.length > 5 && (
+          <button className="ledger-toggle" onClick={() => setShowAll((s) => !s)}>
+            {showAll ? <><ChevronUp size={16} /> Show Less</> : <><ChevronDown size={16} /> View All ({filtered.length})</>}
+          </button>
+        )}
       </section>
 
       <Sheet isOpen={isSheetOpen} onClose={() => setIsSheetOpen(false)} title="New Money Record">
