@@ -48,7 +48,10 @@ const Ledger = () => {
   return (
     <div className="nexus-page ledger-page fade-in">
       <section className="ledger-balance-card">
-        <span>Business wallet</span>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+          <span>Business wallet</span>
+          <button className="icon-shell" onClick={() => setIsSheetOpen(true)} style={{width:34,height:34,borderRadius:999}}><Plus size={18}/></button>
+        </div>
         <strong>{money(walletStats.balance)}</strong>
         <div className="ledger-balance-grid">
           <div><small>Cash in</small><b>{money(walletStats.capitalIn + walletStats.revenue)}</b></div>
@@ -59,13 +62,10 @@ const Ledger = () => {
 
       <section className="control-card">
         <div className="search-control"><Search size={17} /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search transaction, admin, account..." /></div>
-        <div className="control-row">
-          <div className="chip-scroll">
-            {['all', 'capital_in', 'account_purchase', 'psn_deposit', 'slot_sale', 'withdrawal', 'expense', 'adjustment'].map((type) => (
-              <button key={type} className={activeFilter === type ? 'active' : ''} onClick={() => setActiveFilter(type)}>{type === 'all' ? 'All' : type.replace('_', ' ')}</button>
-            ))}
-          </div>
-          <button className="icon-shell" onClick={() => setIsSheetOpen(true)}><Plus size={18}/></button>
+        <div className="chip-scroll">
+          {['all', 'capital_in', 'account_purchase', 'psn_deposit', 'slot_sale', 'withdrawal', 'expense', 'adjustment'].map((type) => (
+            <button key={type} className={activeFilter === type ? 'active' : ''} onClick={() => setActiveFilter(type)}>{type === 'all' ? 'All' : type.replace('_', ' ')}</button>
+          ))}
         </div>
       </section>
 
