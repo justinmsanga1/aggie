@@ -59,11 +59,13 @@ const Ledger = () => {
 
       <section className="control-card">
         <div className="search-control"><Search size={17} /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search transaction, admin, account..." /></div>
-        <div className="chip-scroll">
-          {['all', 'capital_in', 'account_purchase', 'psn_deposit', 'slot_sale', 'withdrawal', 'expense', 'adjustment'].map((type) => (
-            <button key={type} className={activeFilter === type ? 'active' : ''} onClick={() => setActiveFilter(type)}>{type === 'all' ? 'All' : type.replace('_', ' ')}</button>
-          ))}
-          <button className="icon-shell" style={{marginLeft:'auto'}} onClick={() => setIsSheetOpen(true)}><Plus size={18}/></button>
+        <div className="control-row">
+          <div className="chip-scroll">
+            {['all', 'capital_in', 'account_purchase', 'psn_deposit', 'slot_sale', 'withdrawal', 'expense', 'adjustment'].map((type) => (
+              <button key={type} className={activeFilter === type ? 'active' : ''} onClick={() => setActiveFilter(type)}>{type === 'all' ? 'All' : type.replace('_', ' ')}</button>
+            ))}
+          </div>
+          <button className="icon-shell" onClick={() => setIsSheetOpen(true)}><Plus size={18}/></button>
         </div>
       </section>
 

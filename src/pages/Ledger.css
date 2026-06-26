@@ -15,7 +15,8 @@
 .control-card { padding:12px; margin-bottom:14px; }
 .search-control { height:44px; display:flex; align-items:center; gap:10px; background:var(--bg-tertiary); border:1px solid var(--border); border-radius:13px; padding:0 12px; }
 .search-control input { flex:1; border:0; outline:0; background:transparent; color:var(--text-primary); min-width:0; }
-.chip-scroll { display:flex; gap:8px; overflow-x:auto; padding-top:10px; scrollbar-width:none; align-items:center; }
+.control-row { display:flex; align-items:center; gap:8px; padding-top:10px; }
+.control-row .chip-scroll { flex:1; overflow-x:auto; padding-top:0; scrollbar-width:none; display:flex; gap:8px; align-items:center; }
 .chip-scroll button { white-space:nowrap; border:1px solid var(--border); background:var(--bg-tertiary); color:var(--text-secondary); border-radius:999px; padding:8px 11px; font-size:12px; text-transform:capitalize; }
 .chip-scroll button.active { background:var(--success); color:#002114; border-color:var(--success); font-weight:800; }
 .ledger-list { display:flex; flex-direction:column; gap:10px; }
