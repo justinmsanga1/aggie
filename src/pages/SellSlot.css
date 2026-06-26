@@ -27,3 +27,4 @@
 .sale-form-card input, .sale-form-card select, .sale-form-card textarea { width:100%; min-height:44px; border:0; outline:0; color:var(--text-primary); background:transparent; font-size:16px; }
 .sale-form-card textarea { border:1px solid var(--border); border-radius:13px; padding:12px; min-height:78px; background:var(--bg-tertiary); }
 .confirm-sale { height:52px; border:0; border-radius:15px; display:flex; align-items:center; justify-content:center; gap:8px; background:var(--success); color:#002114; font-weight:900; }
+.currency-symbol { font-size:15px; font-weight:800; color:var(--text-tertiary); min-width:17px; text-align:center; }
