@@ -8,7 +8,7 @@ const money = (v) => new Intl.NumberFormat('en-TZ', { style: 'currency', currenc
 
 const AccountDetails = ({ id, accountId, onBack }) => {
   const selectedId = id || accountId;
-  const { accounts, games, transactions, getAccountStats, addTransaction, recordGamePurchase, markDeactivated, updateAccount } = useStore();
+  const { accounts, games, transactions, getAccountStats, addTransaction, recordGamePurchase, markDeactivated, updateAccount, createGame } = useStore();
   const [sheet, setSheet] = useState(null);
   const [busy, setBusy] = useState(false);
   const account = accounts.find((item) => item.id === selectedId);
@@ -36,7 +36,13 @@ const AccountDetails = ({ id, accountId, onBack }) => {
     event.preventDefault();
     try {
       const form = new FormData(event.target);
-      await recordGamePurchase(account.id, form.get('gameId'), parseFloat(form.get('cost')));
+      const customName = form.get('customGame')?.trim();
+      let gameId = form.get('gameId');
+      if (customName) {
+        const created = await createGame({ name: customName });
+        if (created?.id) gameId = created.id;
+      }
+      await recordGamePurchase(account.id, gameId, parseFloat(form.get('cost')));
       setSheet(null);
     } catch (error) {
       alert(error.message || 'Could not record game purchase.');
@@ -73,7 +79,7 @@ const AccountDetails = ({ id, accountId, onBack }) => {
     <section className="detail-card"><div className="section-head"><div><h3>Games</h3><p>Games attached to this account</p></div><button onClick={()=>setSheet('game')}><Plus size={15}/>Add</button></div><div className="detail-games">{gameNames.map((game)=><div key={game.id}><Gamepad2 size={18}/><span>{game.name}</span><b>{money(game.price)}</b></div>)}</div></section>
     <section className="detail-card"><div className="section-head"><div><h3>Account Ledger</h3><p>Account-specific money and sales timeline</p></div></div><div className="detail-timeline">{accountTx.length?accountTx.map((tx)=><div key={tx.id}><span>{tx.date}</span><strong>{tx.note}</strong><b className={['slot_sale','psn_deposit'].includes(tx.type)?'positive':'negative'}>{money(tx.amount)}</b></div>):<p className="empty-line">No account transactions yet.</p>}</div></section>
     <Sheet isOpen={sheet==='deposit'} onClose={()=>setSheet(null)} title="Deposit to PSN wallet"><form onSubmit={deposit}><div className="form-group"><label className="form-label">Amount</label><input className="form-input" name="amount" type="number" step="0.01" required/></div><button className="sheet-submit-btn">Confirm deposit</button></form></Sheet>
-    <Sheet isOpen={sheet==='game'} onClose={()=>setSheet(null)} title="Buy game"><form onSubmit={buyGame}><div className="form-group"><label className="form-label">Game</label><select className="form-select" name="gameId">{games.map((game)=><option key={game.id} value={game.id}>{game.name}</option>)}</select></div><div className="form-group"><label className="form-label">Cost</label><input className="form-input" name="cost" type="number" step="0.01" required/></div><button className="sheet-submit-btn">Record purchase</button></form></Sheet>
+    <Sheet isOpen={sheet==='game'} onClose={()=>setSheet(null)} title="Buy game"><form onSubmit={buyGame}><div className="form-group"><label className="form-label">Game (select existing)</label><select className="form-select" name="gameId">{games.map((game)=><option key={game.id} value={game.id}>{game.name}</option>)}</select></div><div className="form-group"><label className="form-label">Or type a new game name</label><input className="form-input" name="customGame" type="text" placeholder="e.g. FIFA 26"/></div><div className="form-group"><label className="form-label">Cost</label><input className="form-input" name="cost" type="number" step="0.01" required/></div><button className="sheet-submit-btn">Record purchase</button></form></Sheet>
   </div>;
 };
 const SlotBlock = ({ title, slots }) => <div className="slot-block"><h4>{title}</h4>{slots.map((slot, index)=><div key={slot.id} className={`slot-detail ${slot.status}`}><span>{slot.type === 'normal' ? `Normal ${index+1}` : 'Reset cycle'}</span><b>{slot.status}</b></div>)}</div>;

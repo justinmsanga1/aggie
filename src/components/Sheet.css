@@ -17,34 +17,24 @@
 
 .sheet-container {
   position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  left: 50%;
+  top: 50%;
+  translate: -50% -50%;
   z-index: 1;
   background: var(--bg-secondary);
   border: 1px solid var(--border);
-  border-bottom: none;
-  border-radius: 24px 24px 0 0;
+  border-radius: 24px;
   padding: 22px;
-  padding-bottom: calc(22px + var(--safe-bottom));
+  width: min(92vw, 440px);
   max-height: 88vh;
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 -22px 70px rgba(0, 0, 0, 0.62);
+  box-shadow: 0 18px 70px rgba(0, 0, 0, 0.62);
 }
 
 [data-theme='dark'] .sheet-container {
   background: #111318;
-}
-
-.sheet-handle {
-  width: 42px;
-  height: 4px;
-  background: var(--border-strong);
-  border-radius: 100px;
-  margin: -8px auto 18px;
-  opacity: 0.8;
 }
 
 .sheet-header {
