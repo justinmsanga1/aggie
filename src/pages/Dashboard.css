@@ -408,6 +408,14 @@
   text-align: center;
 }
 
+.dashboard-search { margin: -4px 0 12px; }
+.dashboard-search .search-control { background:var(--bg-secondary); border:1px solid var(--border); border-radius:14px; padding:0 12px; display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+.dashboard-search .search-control input { width:100%; min-height:42px; border:0; outline:0; color:var(--text-primary); background:transparent; font-size:15px; }
+.dashboard-search-results { display:flex; flex-direction:column; gap:6px; }
+.dashboard-search-item { width:100%; border:0; background:var(--bg-tertiary); border:1px solid var(--border); border-radius:12px; padding:10px 12px; text-align:left; color:var(--text-primary); }
+.dashboard-search-item strong { display:block; font-size:13px; }
+.dashboard-search-item span { display:block; font-size:11px; color:var(--text-tertiary); }
+
 @media (min-width: 720px) {
   .nexus-dashboard {
     max-width: 760px;

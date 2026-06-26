@@ -32,6 +32,17 @@ const Dashboard = ({ onAction }) => {
   const { walletStats, accounts, transactions, addTransaction, games, currentAdmin } = useStore();
   const [sheet, setSheet] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+
+  const searchResults = useMemo(() => {
+    if (!searchQuery.trim()) return [];
+    const q = searchQuery.toLowerCase();
+    return accounts.filter((acc) => {
+      const names = acc.games.map((id) => games.find((g) => g.id === id)?.name || '').join(' ');
+      return `${acc.email} ${acc.region} ${names}`.toLowerCase().includes(q);
+    }).slice(0, 8);
+  }, [searchQuery, accounts, games]);
 
   const resetAvailable = useMemo(() => accounts.reduce((sum, account) => {
     const slots = [...account.slots.ps4, ...account.slots.ps5];
@@ -112,10 +123,11 @@ const Dashboard = ({ onAction }) => {
           </div>
         </div>
         <div className="topbar-actions">
-          <button aria-label="Search"><Search size={20} /></button>
+          <button aria-label="Search" onClick={() => { setShowSearch((s) => !s); setSearchQuery(''); }}><Search size={20} /></button>
           <button aria-label="Notifications"><Bell size={20} /></button>
         </div>
       </header>
+      {showSearch && <div className="dashboard-search"><div className="search-control"><Search size={17} /><input value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search accounts by email or game..." autoFocus /></div>{searchResults.length > 0 && <div className="dashboard-search-results">{searchResults.map((acc) => <button key={acc.id} className="dashboard-search-item" onClick={() => { setShowSearch(false); setSearchQuery(''); onAction('accounts'); }}><strong>{acc.email}</strong><span>{acc.region} - {acc.games.map((id) => games.find((g) => g.id === id)?.name).filter(Boolean).join(', ')}</span></button>)}</div>}</div>}
 
       <main className="dashboard-stack">
         <section className="wallet-panel">
