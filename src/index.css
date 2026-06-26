@@ -157,6 +157,20 @@ button, input, select, textarea { max-width: 100%; }
   .inline-add-head h3 { font-size: 16px; }
 }
 
+.page-fab {
+  position: fixed;
+  right: 20px;
+  bottom: calc(var(--nav-height) + 20px);
+  z-index: 50;
+}
+
+@media (max-width: 430px) {
+  .page-fab {
+    bottom: calc(var(--nav-height) + 12px);
+    right: 12px;
+  }
+}
+
 input, select, textarea {
   font-size: 16px;
 }

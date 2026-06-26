@@ -47,13 +47,7 @@ const Ledger = () => {
 
   return (
     <div className="nexus-page ledger-page fade-in">
-      <header className="page-top">
-        <div>
-          
-          <p>Every cash movement in one clean trail.</p>
-        </div>
-        <button className="icon-shell" onClick={() => setIsSheetOpen(true)}><Plus size={21} /></button>
-      </header>
+      <header className="page-top"></header>
 
       <section className="ledger-balance-card">
         <span>Business wallet</span>
@@ -94,6 +88,8 @@ const Ledger = () => {
           </button>
         )}
       </section>
+
+      <div className="page-fab"><button className="icon-shell" onClick={() => setIsSheetOpen(true)}><Plus size={21} /></button></div>
 
       <Sheet isOpen={isSheetOpen} onClose={() => setIsSheetOpen(false)} title="New Money Record">
         <form onSubmit={submit}>

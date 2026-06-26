@@ -127,9 +127,6 @@ const Dashboard = ({ onAction }) => {
       <header className="nexus-topbar">
         <div className="admin-cluster">
           <div className="admin-avatar">{currentAdmin.name.slice(-1)}</div>
-          <div>
-            <p>{currentAdmin.name} - {new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</p>
-          </div>
         </div>
         <div className="topbar-actions">
           <button aria-label="Search" onClick={() => { setShowSearch((s) => !s); setSearchQuery(''); }}><Search size={20} /></button>
