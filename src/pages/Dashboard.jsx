@@ -9,18 +9,20 @@ import {
   ReceiptText,
   Send,
   TrendingUp,
-  ArrowUpRight,
-  ArrowDownRight,
   RotateCcw,
   AlertTriangle,
   ChevronRight,
-  Gamepad2,
   ShieldCheck,
   Clock3,
-  Banknote
+  Banknote,
+  ArrowUpCircle,
+  ArrowDownCircle,
+  MinusCircle,
+  Receipt
 } from 'lucide-react';
 import { useStore } from '../context/StoreContext';
 import Sheet from '../components/Sheet';
+import SideDrawer from '../components/SideDrawer';
 import './Dashboard.css';
 
 const currency = (value) => new Intl.NumberFormat('en-US', {
@@ -35,6 +37,7 @@ const Dashboard = ({ onAction }) => {
   const [saving, setSaving] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [showAllTx, setShowAllTx] = useState(false);
 
   const searchResults = useMemo(() => {
     if (!searchQuery.trim()) return [];
@@ -62,16 +65,22 @@ const Dashboard = ({ onAction }) => {
     return account.revenue < invested;
   }).length, [accounts]);
 
-  const lastSales = useMemo(() => transactions
-    .filter((transaction) => transaction.type === 'slot_sale')
+  const positiveTypes = useMemo(() => ['slot_sale', 'capital_in', 'adjustment'], []);
+
+  const recentTransactions = useMemo(() => transactions
     .slice(0, 5)
-    .map((transaction) => {
-      const account = accounts.find((item) => item.id === transaction.accountId);
-      const gameName = transaction.note?.replace('Sold slot for game: ', '') || 'Slot sale';
-      const consoleName = transaction.slotId?.startsWith('ps5') ? 'PS5' : 'PS4';
-      const slot = account?.slots?.[consoleName.toLowerCase()]?.find((item) => item.id === transaction.slotId);
-      return { transaction, account, gameName, consoleName, slotType: slot?.type || 'normal' };
-    }), [transactions, accounts]);
+    .map((transaction) => ({
+      ...transaction,
+      isPositive: positiveTypes.includes(transaction.type),
+    })), [transactions, positiveTypes]);
+
+  const iconFor = (type) => {
+    if (type === 'slot_sale' || type === 'capital_in') return <ArrowUpCircle size={18} />;
+    if (type === 'withdrawal') return <ArrowDownCircle size={18} />;
+    if (type === 'expense') return <MinusCircle size={18} />;
+    if (type === 'psn_deposit') return <Wallet size={18} />;
+    return <Receipt size={18} />;
+  };
 
   const handleSheetSubmit = async (event) => {
     event.preventDefault();
@@ -175,24 +184,24 @@ const Dashboard = ({ onAction }) => {
         <section className="section-card">
           <div className="section-head">
             <div>
-              <h3>Last 5 Sold Slots</h3>
-              <p>Recent revenue from account inventory</p>
+              <h3>Recent Activity</h3>
+              <p>Latest 5 transactions across all accounts</p>
             </div>
-            <button onClick={() => onAction('money')}>View</button>
+            <button onClick={() => setShowAllTx(true)}>View All</button>
           </div>
           <div className="sales-list">
-            {lastSales.length ? lastSales.map(({ transaction, account, gameName, consoleName, slotType }) => (
-              <div className="sale-row" key={transaction.id}>
-                <div className="sale-icon"><Gamepad2 size={18} /></div>
+            {recentTransactions.length ? recentTransactions.map((tx) => (
+              <div className="sale-row" key={tx.id}>
+                <div className={`sale-icon ${tx.isPositive ? 'positive' : 'negative'}`}>{iconFor(tx.type)}</div>
                 <div className="sale-info">
-                  <strong>{account?.email || 'Unknown account'}</strong>
-                  <span>{gameName} - {consoleName} {slotType}</span>
-                  <small>{transaction.admin} - {transaction.date}</small>
+                  <strong>{tx.note}</strong>
+                  <span>{tx.type.replace('_', ' ')} - {tx.admin}</span>
+                  <small>{tx.date}</small>
                 </div>
-                <div className="sale-amount">+{currency(transaction.amount)}</div>
+                <div className={`sale-amount ${tx.isPositive ? '' : 'negative'}`}>{tx.isPositive ? '+' : '-'}{currency(tx.amount)}</div>
               </div>
             )) : (
-              <div className="empty-line">No slot sales recorded yet.</div>
+              <div className="empty-line">No transactions yet.</div>
             )}
           </div>
         </section>
@@ -244,6 +253,8 @@ const Dashboard = ({ onAction }) => {
           </button>
         </form>
       </Sheet>
+
+      <SideDrawer isOpen={showAllTx} onClose={() => setShowAllTx(false)} title="All Transactions" transactions={transactions} />
     </div>
   );
 };
