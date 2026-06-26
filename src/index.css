@@ -129,6 +129,8 @@ html, body, #root { width: 100%; min-width: 0; }
 button, input, select, textarea { max-width: 100%; }
 .page-top, .details-top, .account-head, .match-top, .section-head, .wallet-row, .wallet-amount-row { min-width: 0; }
 .page-top > div, .details-top > div, .account-head > div, .match-top > div, .admin-cluster > div { min-width: 0; }
+.page-top > div { text-align: center; flex: 1; }
+.details-top > div { text-align: center; }
 
 @media (max-width: 430px) {
   :root { --nav-height: 72px; }
