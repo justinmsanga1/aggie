@@ -424,7 +424,16 @@ export const StoreProvider = ({ children }) => {
       if (data.status) payload.status = data.status;
       if (data.notes !== undefined) payload.notes = data.notes;
       if (data.password !== undefined) payload.password = data.password;
+      if (data.email !== undefined) payload.email = data.email;
+      if (data.region !== undefined) payload.region = data.region;
+      if (data.purchaseCost !== undefined) payload.purchase_cost = data.purchaseCost;
       await supabase.from('accounts').update(payload).eq('id', id);
+      if (data.games) {
+        await supabase.from('account_games').delete().eq('account_id', id);
+        await supabase.from('account_games').insert(
+          data.games.map((gameId) => ({ account_id: id, game_id: gameId, purchase_price: 0 }))
+        );
+      }
       await logActivity('account_updated', 'account', id, payload);
       await loadFromSupabase({ silent: true });
       return;
