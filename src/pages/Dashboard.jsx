@@ -31,6 +31,18 @@ const currency = (value) => new Intl.NumberFormat('en-US', {
   maximumFractionDigits: 0
 }).format(Number(value || 0));
 
+const isInPeriod = (dateStr, period) => {
+  if (period === 'all time') return true;
+  const date = new Date(dateStr);
+  const now = new Date();
+  const diff = now - date;
+  const msPerDay = 86400000;
+  if (period === 'today') return diff < msPerDay && date.getDate() === now.getDate();
+  if (period === 'week') return diff < 7 * msPerDay;
+  if (period === 'month') return diff < 30 * msPerDay;
+  return true;
+};
+
 const Dashboard = ({ onAction }) => {
   const { walletStats, accounts, transactions, addTransaction, games, currentAdmin } = useStore();
   const [sheet, setSheet] = useState(null);
@@ -38,6 +50,44 @@ const Dashboard = ({ onAction }) => {
   const [showSearch, setShowSearch] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [showAllTx, setShowAllTx] = useState(false);
+  const [period, setPeriod] = useState('all time');
+
+  const filteredTransactions = useMemo(() =>
+    transactions.filter((tx) => isInPeriod(tx.date, period)),
+  [transactions, period]);
+
+  const periodStats = useMemo(() => {
+    let capitalIn = 0;
+    let accountPurchase = 0;
+    let psnDeposit = 0;
+    let slotSale = 0;
+    let withdrawal = 0;
+    let expense = 0;
+    let adjustment = 0;
+
+    filteredTransactions.forEach(t => {
+      const amount = Number(t.amount || 0);
+      switch (t.type) {
+        case 'capital_in': capitalIn += amount; break;
+        case 'account_purchase': accountPurchase += amount; break;
+        case 'psn_deposit': psnDeposit += amount; break;
+        case 'slot_sale': slotSale += amount; break;
+        case 'withdrawal': withdrawal += amount; break;
+        case 'expense': expense += amount; break;
+        case 'adjustment': adjustment += amount; break;
+      }
+    });
+
+    const balance = capitalIn + slotSale + adjustment - accountPurchase - psnDeposit - withdrawal - expense;
+    return {
+      capitalIn, accountPurchase, psnDeposit, slotSale, withdrawal, expense, adjustment,
+      totalInvested: capitalIn,
+      revenue: slotSale,
+      totalSpent: capitalIn - balance,
+      cashIn: capitalIn + slotSale,
+      cashOut: accountPurchase + psnDeposit + expense + withdrawal,
+    };
+  }, [filteredTransactions]);
 
   const searchResults = useMemo(() => {
     if (!searchQuery.trim()) return [];
@@ -67,12 +117,12 @@ const Dashboard = ({ onAction }) => {
 
   const positiveTypes = useMemo(() => ['slot_sale', 'capital_in', 'adjustment'], []);
 
-  const recentTransactions = useMemo(() => transactions
+  const recentTransactions = useMemo(() => filteredTransactions
     .slice(0, 5)
     .map((transaction) => ({
       ...transaction,
       isPositive: positiveTypes.includes(transaction.type),
-    })), [transactions, positiveTypes]);
+    })), [filteredTransactions, positiveTypes]);
 
   const iconFor = (type) => {
     if (type === 'slot_sale' || type === 'capital_in') return <ArrowUpCircle size={18} />;
@@ -107,11 +157,11 @@ const Dashboard = ({ onAction }) => {
   };
 
   const metrics = [
-    { label: 'Total capital', value: currency(walletStats.totalInvested), tone: 'info' },
-    { label: 'Sales revenue', value: currency(walletStats.revenue), tone: 'success' },
-    { label: 'Total spent', value: currency(walletStats.totalSpent), tone: 'danger' },
+    { label: 'Total capital', value: currency(periodStats.totalInvested), tone: 'info' },
+    { label: 'Sales revenue', value: currency(periodStats.revenue), tone: 'success' },
+    { label: 'Total spent', value: currency(periodStats.totalSpent), tone: 'danger' },
     { label: 'PSN wallet locked', value: currency(walletStats.psnWalletsBalance), tone: 'muted' },
-    { label: 'Withdrawn profit', value: currency(walletStats.withdrawal), tone: 'danger' }
+    { label: 'Withdrawn profit', value: currency(periodStats.withdrawal), tone: 'danger' }
   ];
 
   const quickActions = [
@@ -147,13 +197,19 @@ const Dashboard = ({ onAction }) => {
             <Wallet size={30} />
           </div>
           <div className="wallet-progress">
-            <span style={{ width: `${Math.min(100, Math.max(12, (walletStats.revenue / Math.max(walletStats.totalInvested, 1)) * 100))}%` }} />
+            <span style={{ width: `${Math.min(100, Math.max(12, (periodStats.revenue / Math.max(periodStats.totalInvested, 1)) * 100))}%` }} />
           </div>
           <div className="wallet-foot">
-            <div><span>Cash in</span><strong>{currency(walletStats.capitalIn + walletStats.revenue)}</strong></div>
-            <div><span>Cash out</span><strong>{currency(walletStats.accountPurchase + walletStats.psnDeposit + walletStats.expense + walletStats.withdrawal)}</strong></div>
+            <div><span>Cash in</span><strong>{currency(periodStats.cashIn)}</strong></div>
+            <div><span>Cash out</span><strong>{currency(periodStats.cashOut)}</strong></div>
           </div>
         </section>
+
+        <div className="chip-scroll" style={{marginBottom: 12}}>
+          {['today','week','month','all time'].map((p) => (
+            <button key={p} className={period === p ? 'active' : ''} onClick={() => setPeriod(p)}>{p}</button>
+          ))}
+        </div>
 
         <section className="quick-action-grid">
           {quickActions.map((action) => {
@@ -180,7 +236,7 @@ const Dashboard = ({ onAction }) => {
           <div className="section-head">
             <div>
               <h3>Recent Activity</h3>
-              <p>Latest 5 transactions across all accounts</p>
+              <p>Latest 5 transactions ({period})</p>
             </div>
             <button onClick={() => setShowAllTx(true)}>View All</button>
           </div>
