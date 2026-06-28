@@ -66,7 +66,8 @@ const Reports = () => {
     return [...map.entries()].sort((a,b)=>b[1]-a[1]).slice(0,5);
   }, [filteredTxs]);
   const resetList = accounts.filter(a=>a.nextDeactivation).slice(0,6);
-  const unrecovered = accounts.filter((a)=>a.revenue < (a.purchaseCost + a.psnDeposits));
+  const getExpenses = (accId) => transactions.filter(t=>t.accountId===accId&&t.type==='expense').reduce((s,t)=>s+Number(t.amount||0),0);
+  const unrecovered = accounts.filter((a)=>a.revenue < (Number(a.purchaseCost||0)+Number(a.psnDeposits||0)+getExpenses(a.id)));
 
   const downloadReport = () => {
     const lines = [];
@@ -75,11 +76,10 @@ const Reports = () => {
     lines.push('');
     lines.push('SUMMARY');
     lines.push(`Revenue:       ${money(periodStats.revenue)}`);
-    lines.push(`Profit:        ${money(periodStats.profit)}`);
+    lines.push(`Profit:        ${money(periodStats.accountProfit)}`);
+    lines.push(`Loss:          ${money(periodStats.accountLoss)}`);
     lines.push(`Capital:       ${money(periodStats.totalInvested)}`);
     lines.push(`Total spent:   ${money(periodStats.totalSpent)}`);
-    lines.push(`Account profit: ${money(periodStats.accountProfit)}`);
-    lines.push(`Account loss:   ${money(periodStats.accountLoss)}`);
     lines.push(`Total balance:   ${money(walletStats.balance + periodStats.revenue)}`);
     lines.push(`Unrecovered:   ${unrecovered.length} account(s)`);
     lines.push('');

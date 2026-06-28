@@ -84,7 +84,7 @@ const Dashboard = ({ onAction }) => {
       totalInvested: capitalIn,
       revenue: slotSale,
       totalSpent: capitalIn - balance,
-      cashIn: capitalIn + slotSale,
+      cashIn: capitalIn + slotSale + adjustment,
       cashOut: accountPurchase + psnDeposit + expense + withdrawal,
     };
   }, [filteredTransactions]);

@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from 'react';
-import { Search, Plus, ChevronRight, ChevronDown, ChevronUp, X, Pencil, Trash2 } from 'lucide-react';
+import React, { useMemo, useState, useCallback } from 'react';
+import { Search, Plus, ChevronRight, ChevronDown, ChevronUp, X, Pencil, Trash2, Upload, Settings } from 'lucide-react';
 import { useStore } from '../context/StoreContext';
 import './Accounts.css';
 
@@ -16,7 +16,23 @@ const Accounts = ({ onViewDetails }) => {
   const [saving, setSaving] = useState(false);
   const [showAll, setShowAll] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const [sheetUrl, setSheetUrl] = useState(() => localStorage.getItem('sheetBackupUrl') || '');
+  const [backupStatus, setBackupStatus] = useState(null);
+  const [showSheetConfig, setShowSheetConfig] = useState(false);
   const openAddAccount = () => { setEditingAccount(null); setSelectedGames([]); setNewGameNames(['']); setOpen(true); };
+  const backupToSheet = useCallback(async () => {
+    if (!sheetUrl) { setBackupStatus('Set your web app URL first'); return; }
+    setBackupStatus('saving');
+    try {
+      await fetch(sheetUrl, {
+        method: 'POST',
+        mode: 'no-cors',
+        body: JSON.stringify({ accounts }),
+      });
+      setBackupStatus('done');
+    } catch { setBackupStatus('error'); }
+    setTimeout(() => setBackupStatus(null), 3000);
+  }, [sheetUrl, accounts]);
   const openEditAccount = (account) => { setEditingAccount(account); setSelectedGames([...account.games]); setNewGameNames(['']); setOpen(true); };
 
   const enriched = useMemo(() => accounts.map((account) => {
@@ -101,7 +117,7 @@ const Accounts = ({ onViewDetails }) => {
     <div className="nexus-page accounts-page fade-in">
       {!open && <button type="button" className="add-account-wide" onClick={openAddAccount}><Plus size={18}/> Buy / Add Account</button>}
       {open && <section className="inline-add-account"><div className="inline-add-head"><div><h3>{editingAccount ? 'Edit Account' : 'Buy / Add Account'}</h3><p>{editingAccount ? 'Update account details and attached games.' : 'Record the account purchase and attach one or more games from database.'}</p></div><button type="button" onClick={resetAddForm} disabled={saving}>Close</button></div><form key={editingAccount ? editingAccount.id : 'add'} onSubmit={submit}><div className="form-group"><label className="form-label">Email</label><input className="form-input" name="email" type="email" required autoFocus defaultValue={editingAccount?.email || ''}/></div><div className="form-group"><label className="form-label">Password</label><input className="form-input" name="password" type="text" placeholder="PSN account password" defaultValue={editingAccount?.password || ''}/></div><div className="form-group"><label className="form-label">Region</label><select className="form-select" name="region" defaultValue={editingAccount?.region || 'US'}><option>US</option><option>UK</option><option>TR</option><option>JP</option></select></div><div className="form-group"><label className="form-label">Cost (TZS)</label><input className="form-input" name="cost" type="number" step="1" min="0" required defaultValue={editingAccount?.purchaseCost || ''}/></div><div className="form-group"><label className="form-label">Notes</label><input className="form-input" name="notes" type="text" placeholder="Optional notes" defaultValue={editingAccount?.notes || ''}/></div><div className="form-group"><label className="form-label">Games on this account</label>{games.length ? <div className="game-check-list">{games.map(g=><label key={g.id} className="game-check-row"><input type="checkbox" checked={selectedGames.includes(g.id)} onChange={()=>toggleGame(g.id)}/><span>{g.name}</span></label>)}</div> : <p className="empty-line">No games yet. Type a new game name below.</p>}</div><div className="form-group"><label className="form-label">+ Add new game names</label><div className="dynamic-game-inputs">{newGameNames.map((val, i)=><div key={i} className="game-input-row"><input className="form-input" value={val} onChange={(e)=>{const next=[...newGameNames]; next[i]=e.target.value; setNewGameNames(next);}} placeholder="e.g. FIFA 26 Ultimate Edition"/>{newGameNames.length>1 ? <button type="button" className="icon-shell game-input-remove" onClick={()=>setNewGameNames(newGameNames.filter((_,j)=>j!==i))}><X size={16}/></button> : null}</div>)}<button type="button" className="game-input-add" onClick={()=>setNewGameNames([...newGameNames, ''])}><Plus size={16}/> Add game</button></div></div><div className="form-group"><label className="form-label">Notes</label><textarea className="form-textarea" name="notes"/></div><button type="submit" className="sheet-submit-btn" disabled={saving}>{saving ? 'Saving...' : 'Add account'}</button></form></section>}
-      <section className="control-card"><div className="search-control"><Search size={17}/><input value={query} onChange={(e)=>setQuery(e.target.value)} placeholder="Search email, game, region..."/></div><div className="chip-scroll">{filters.map(([id,label])=><button key={id} className={filter===id?'active':''} onClick={()=>setFilter(id)}>{label}</button>)}</div></section>
+      <section className="control-card"><div className="search-control"><Search size={17}/><input value={query} onChange={(e)=>setQuery(e.target.value)} placeholder="Search email, game, region..."/></div><div className="chip-scroll">{filters.map(([id,label])=><button key={id} className={filter===id?'active':''} onClick={()=>setFilter(id)}>{label}</button>)}</div><div className="backup-row"><button className="backup-btn" onClick={backupToSheet} disabled={backupStatus==='saving'}><Upload size={16}/>{backupStatus==='saving'?'Backing up...':backupStatus==='done'?'Done ✓':'Backup to Sheets'}</button><button className="icon-shell" onClick={()=>setShowSheetConfig(s=>!s)} title="Configure"><Settings size={16}/></button><span className={`backup-status${backupStatus==='error'?' error':''}`}>{backupStatus==='error'?'Failed':''}</span></div>{showSheetConfig && <div className="sheet-config"><input className="form-input" value={sheetUrl} onChange={(e)=>{setSheetUrl(e.target.value);localStorage.setItem('sheetBackupUrl',e.target.value);}} placeholder="https://script.google.com/macros/s/.../exec"/><small>Paste your Google Apps Script web app URL</small></div>}</section>
       <section className="accounts-list">
         {filtered.length === 0 ? (
           <p className="empty-line">No accounts yet. Tap Buy / Add Account to create your first one.</p>
