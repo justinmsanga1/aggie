@@ -219,7 +219,7 @@ export const StoreProvider = ({ children }) => {
 
     const balance = computeBusinessBalance(transactions);
     const psnWalletsBalance = accounts.reduce((sum, acc) => sum + (Number(acc.psnDeposits || 0) - Number(acc.psnGamePurchases || 0)), 0);
-    const totalInvested = accounts.reduce((sum, acc) => sum + Number(acc.purchaseCost || 0) + Number(acc.psnDeposits || 0) + getAccountExpenseTotal(acc.id, transactions), 0);
+    const totalInvested = capitalIn;
     const revenue = slotSale;
     const profit = revenue + psnWalletsBalance - totalInvested;
 

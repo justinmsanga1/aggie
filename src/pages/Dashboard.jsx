@@ -107,10 +107,9 @@ const Dashboard = ({ onAction }) => {
   };
 
   const metrics = [
-    { label: 'Total capital', value: currency(walletStats.capitalIn), tone: 'neutral' },
-    { label: 'Total invested', value: currency(walletStats.totalInvested), tone: 'info' },
+    { label: 'Total capital', value: currency(walletStats.totalInvested), tone: 'info' },
     { label: 'Sales revenue', value: currency(walletStats.revenue), tone: 'success' },
-    { label: 'Profit / loss', value: currency(walletStats.profit), tone: walletStats.profit >= 0 ? 'success' : 'danger' },
+    { label: 'Total spent', value: currency(walletStats.profit), tone: walletStats.profit >= 0 ? 'success' : 'danger' },
     { label: 'PSN wallet locked', value: currency(walletStats.psnWalletsBalance), tone: 'muted' },
     { label: 'Withdrawn profit', value: currency(walletStats.withdrawal), tone: 'danger' }
   ];
