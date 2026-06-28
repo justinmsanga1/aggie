@@ -1,12 +1,12 @@
 import React, { useMemo, useState } from 'react';
-import { Search, Plus, ChevronRight, ChevronDown, ChevronUp, X } from 'lucide-react';
+import { Search, Plus, ChevronRight, ChevronDown, ChevronUp, X, Pencil, Trash2 } from 'lucide-react';
 import { useStore } from '../context/StoreContext';
 import './Accounts.css';
 
 const money = (v) => new Intl.NumberFormat('en-TZ', { style: 'currency', currency: 'TZS', maximumFractionDigits: 0 }).format(Number(v || 0));
 
 const Accounts = ({ onViewDetails }) => {
-  const { accounts, games, getAccountStats, addAccount, createGame } = useStore();
+  const { accounts, games, getAccountStats, addAccount, createGame, deleteAccount } = useStore();
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState('all');
   const [open, setOpen] = useState(false);
@@ -98,7 +98,7 @@ const Accounts = ({ onViewDetails }) => {
           <p className="empty-line">No accounts yet. Tap Buy / Add Account to create your first one.</p>
         ) : visible.map(({ account, stats, names }) => (
           <article key={account.id} className="account-card" onClick={() => onViewDetails(account.id)}>
-            <div className="account-head"><div><strong>{account.email}</strong><span>{account.region} - {account.condition}</span></div><ChevronRight size={18}/></div>
+            <div className="account-head"><div><strong>{account.email}</strong><span>{account.region} - {account.condition}</span></div><div className="account-actions"><button className="icon-shell" onClick={(e) => { e.stopPropagation(); onViewDetails(account.id); }} title="Edit"><Pencil size={16}/></button><button className="icon-shell" onClick={(e) => { e.stopPropagation(); if (confirm('Delete this account and all its data?')) deleteAccount(account.id); }} title="Delete"><Trash2 size={16}/></button></div></div>
             <div className="game-chips">{names.slice(0,3).map((name)=><span key={name}>{name}</span>)}{names.length>3 && <span>+{names.length-3}</span>}</div>
             <div className="slot-map"><SlotLine label="PS4" slots={account.slots.ps4}/><SlotLine label="PS5" slots={account.slots.ps5}/></div>
             <div className="account-money"><div><small>Invested</small><b>{money(stats.totalInvested)}</b></div><div><small>Revenue</small><b>{money(account.revenue)}</b></div><div><small>P/L</small><b className={stats.profit>=0?'positive':'negative'}>{money(stats.profit)}</b></div><div><small>PSN left</small><b>{money(stats.psnBalance)}</b></div></div>

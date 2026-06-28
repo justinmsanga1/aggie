@@ -5,6 +5,9 @@
 .account-head { display:flex; justify-content:space-between; gap:10px; align-items:flex-start; }
 .account-head strong, .account-head span { display:block; }
 .account-head strong { font-size:14px; overflow:hidden; text-overflow:ellipsis; }
+.account-actions { display:flex; gap:4px; }
+.account-actions button { background:var(--bg-tertiary); border:1px solid var(--border); border-radius:8px; width:32px; height:32px; display:flex; align-items:center; justify-content:center; color:var(--text-secondary); cursor:pointer; }
+.account-actions button:hover { color:var(--text-primary); border-color:var(--text-tertiary); }
 .account-head span { color:var(--text-tertiary); font-size:11px; text-transform:capitalize; }
 .game-chips { display:flex; flex-wrap:wrap; gap:6px; margin:12px 0; }
 .game-chips span { background:var(--bg-tertiary); border:1px solid var(--border); border-radius:999px; color:var(--text-secondary); padding:5px 8px; font-size:11px; }

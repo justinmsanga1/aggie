@@ -404,6 +404,19 @@ export const StoreProvider = ({ children }) => {
     }));
   };
 
+  const deleteAccount = async (id) => {
+    if (dbReady && supabase) {
+      await supabase.from('account_games').delete().eq('account_id', id);
+      await supabase.from('slots').delete().eq('account_id', id);
+      await supabase.from('money_transactions').delete().eq('account_id', id);
+      await supabase.from('accounts').delete().eq('id', id);
+      await logActivity('account_deleted', 'account', id, {});
+      await loadFromSupabase({ silent: true });
+      return;
+    }
+    setAccounts((prev) => prev.filter((acc) => acc.id !== id));
+  };
+
   const updateAccount = async (id, data) => {
     if (dbReady && supabase) {
       const payload = {};
@@ -566,7 +579,7 @@ export const StoreProvider = ({ children }) => {
 
   const value = {
     accounts, transactions, games, currentAdmin, walletStats, loading, dbReady, dbError, hasSupabaseConfig,
-    getAccountStats, addTransaction, recordGamePurchase, markDeactivated, addAccount, updateAccount, createGame, sellSlot, refreshData: loadFromSupabase,
+    getAccountStats, addTransaction, recordGamePurchase, markDeactivated, addAccount, updateAccount, deleteAccount, createGame, sellSlot, refreshData: loadFromSupabase,
     theme, toggleTheme
   };
 
