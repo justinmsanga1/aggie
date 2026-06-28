@@ -23,16 +23,45 @@ const Accounts = ({ onViewDetails }) => {
   const backupToSheet = useCallback(async () => {
     if (!sheetUrl) { setBackupStatus('Set your web app URL first'); return; }
     setBackupStatus('saving');
-    try {
-      await fetch(sheetUrl, {
-        method: 'POST',
-        mode: 'no-cors',
-        body: JSON.stringify({ accounts }),
+    let ok = 0, fail = 0;
+    for (const acc of accounts) {
+      const gameNames = (acc.games || []).map(id => games.find(g => g.id === id)?.name || 'Unknown');
+      const slotHistory = [];
+      const ps5Slots = (acc.slots?.ps5 || []).map(s => {
+        if (s.status === 'sold') slotHistory.push({ console: 'PS5', slot: s.id, price: s.price, date: s.date });
+        return s.status === 'sold' || s.status === 'locked';
       });
-      setBackupStatus('done');
-    } catch { setBackupStatus('error'); }
-    setTimeout(() => setBackupStatus(null), 3000);
-  }, [sheetUrl, accounts]);
+      const ps4Slots = (acc.slots?.ps4 || []).map(s => {
+        if (s.status === 'sold') slotHistory.push({ console: 'PS4', slot: s.id, price: s.price, date: s.date });
+        return s.status === 'sold' || s.status === 'locked';
+      });
+      const payload = {
+        action: 'add',
+        account: {
+          email: acc.email,
+          password: acc.password || '',
+          console: 'Both PS4 & PS5',
+          region: acc.region || 'US',
+          games: gameNames,
+          costTZS: Number(acc.purchaseCost || 0),
+          targetSellTZS: 0,
+          actualSellTZS: Number(acc.revenue || 0),
+          ps5Slots: ps5Slots.length ? ps5Slots : [false, false, false],
+          ps4Slots: ps4Slots.length ? ps4Slots : [false, false, false],
+          status: acc.condition === 'clean' ? 'Available' : acc.condition === 'warning' ? 'Partial' : 'Available',
+          dateAdded: acc.createdAt || '',
+          slotHistory,
+          notes: acc.notes || '',
+        },
+      };
+      try {
+        await fetch(sheetUrl, { method: 'POST', mode: 'no-cors', body: JSON.stringify(payload) });
+        ok++;
+      } catch { fail++; }
+    }
+    setBackupStatus(fail ? 'error' : 'done');
+    setTimeout(() => setBackupStatus(null), 4000);
+  }, [sheetUrl, accounts, games]);
   const openEditAccount = (account) => { setEditingAccount(account); setSelectedGames([...account.games]); setNewGameNames(['']); setOpen(true); };
 
   const enriched = useMemo(() => accounts.map((account) => {
