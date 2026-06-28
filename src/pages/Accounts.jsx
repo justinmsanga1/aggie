@@ -119,7 +119,6 @@ const Accounts = ({ onViewDetails }) => {
           </button>
         )}
       </section>
-    </div>
 
       {confirmDelete && (
         <div className="modal-overlay" onClick={() => setConfirmDelete(null)}>
@@ -133,6 +132,7 @@ const Accounts = ({ onViewDetails }) => {
           </div>
         </div>
       )}
+    </div>
   );
 };
 const SlotLine = ({ label, slots }) => <div className="slot-line"><span>{label}</span><div>{slots.map((slot)=><i key={slot.id} className={`${slot.status} ${slot.type}`} title={`${slot.type} ${slot.status}`}/>)}</div></div>;
