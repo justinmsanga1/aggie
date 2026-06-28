@@ -161,7 +161,8 @@ const Dashboard = ({ onAction }) => {
     { label: 'Sales revenue', value: currency(periodStats.revenue), tone: 'success' },
     { label: 'Total spent', value: currency(periodStats.totalSpent), tone: 'danger' },
     { label: 'PSN wallet locked', value: currency(walletStats.psnWalletsBalance), tone: 'muted' },
-    { label: 'Withdrawn profit', value: currency(periodStats.withdrawal), tone: 'danger' }
+    { label: 'Withdrawn profit', value: currency(periodStats.withdrawal), tone: 'danger' },
+    { label: 'Expenses', value: currency(periodStats.expense), tone: 'danger' }
   ];
 
   const quickActions = [
