@@ -78,12 +78,11 @@ const Dashboard = ({ onAction }) => {
       }
     });
 
-    const balance = capitalIn + slotSale + adjustment - accountPurchase - psnDeposit - withdrawal - expense;
     return {
       capitalIn, accountPurchase, psnDeposit, slotSale, withdrawal, expense, adjustment,
       totalInvested: capitalIn,
       revenue: slotSale,
-      totalSpent: capitalIn - balance,
+      totalSpent: accountPurchase + psnDeposit + expense + withdrawal,
       cashIn: capitalIn + slotSale,
       cashOut: accountPurchase + psnDeposit + expense + withdrawal,
     };
