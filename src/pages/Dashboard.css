@@ -205,7 +205,7 @@
 .quick-action-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8px;
+  gap: 6px;
 }
 
 .nexus-action {
@@ -220,9 +220,9 @@
 }
 
 .nexus-action span {
-  width: 64px;
-  height: 64px;
-  border-radius: 14px;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
   display: grid;
   place-items: center;
   background: rgba(17, 19, 24, 0.92);
@@ -244,7 +244,7 @@
 }
 
 .nexus-action strong {
-  font-size: 10px;
+  font-size: 9px;
   line-height: 1.1;
   white-space: nowrap;
 }
