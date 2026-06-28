@@ -78,10 +78,12 @@ const Dashboard = ({ onAction }) => {
       }
     });
 
+    const balance = capitalIn + slotSale + adjustment - accountPurchase - psnDeposit - withdrawal - expense;
     return {
       capitalIn, accountPurchase, psnDeposit, slotSale, withdrawal, expense, adjustment,
       totalInvested: capitalIn,
       revenue: slotSale,
+      totalSpent: capitalIn - balance,
       cashIn: capitalIn + slotSale,
       cashOut: accountPurchase + psnDeposit + expense + withdrawal,
     };
@@ -157,7 +159,7 @@ const Dashboard = ({ onAction }) => {
   const metrics = [
     { label: 'Total capital', value: currency(periodStats.totalInvested), tone: 'info' },
     { label: 'Sales revenue', value: currency(periodStats.revenue), tone: 'success' },
-    { label: 'Total spent', value: currency(walletStats.capitalIn - walletStats.balance), tone: 'danger' },
+    { label: 'Total spent', value: currency(periodStats.totalSpent), tone: 'danger' },
     { label: 'PSN wallet locked', value: currency(walletStats.psnWalletsBalance), tone: 'muted' },
     { label: 'Withdrawn profit', value: currency(periodStats.withdrawal), tone: 'danger' }
   ];

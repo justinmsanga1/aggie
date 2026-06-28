@@ -18,7 +18,7 @@ const isInPeriod = (dateStr, period) => {
 };
 
 const Reports = () => {
-  const { accounts, transactions, walletStats } = useStore();
+  const { accounts, transactions } = useStore();
   const [period, setPeriod] = useState('month');
 
   const filteredTxs = useMemo(() => transactions.filter((tx) => isInPeriod(tx.date, period)), [transactions, period]);
@@ -43,10 +43,11 @@ const Reports = () => {
         case 'adjustment': adjustment += amount; break;
       }
     });
+    const balance = capitalIn + slotSale + adjustment - accountPurchase - psnDeposit - withdrawal - expense;
     const profit = slotSale - expense;
     return {
       revenue: slotSale, profit, capitalIn,
-      totalSpent: accountPurchase + psnDeposit + expense + withdrawal,
+      totalSpent: capitalIn - balance,
       totalInvested: capitalIn,
     };
   }, [filteredTxs]);
@@ -68,7 +69,7 @@ const Reports = () => {
     lines.push(`Revenue:       ${money(periodStats.revenue)}`);
     lines.push(`Profit:        ${money(periodStats.profit)}`);
     lines.push(`Capital:       ${money(periodStats.totalInvested)}`);
-    lines.push(`Total spent:   ${money(walletStats.totalSpent)}`);
+    lines.push(`Total spent:   ${money(periodStats.totalSpent)}`);
     lines.push(`Unrecovered:   ${unrecovered.length} account(s)`);
     lines.push('');
     lines.push('TOP GAMES');
@@ -99,7 +100,7 @@ const Reports = () => {
     URL.revokeObjectURL(url);
   };
 
-  return <div className="nexus-page reports-page fade-in"><header className="page-top"></header><div className="control-row" style={{marginBottom:12}}><div className="chip-scroll">{['today','week','month','all time'].map(p=><button key={p} className={period===p?'active':''} onClick={()=>setPeriod(p)}>{p}</button>)}</div><button className="icon-shell" onClick={downloadReport}><Download size={18}/></button></div><section className="report-hero"><div><span>Sales revenue</span><strong>{money(periodStats.revenue)}</strong><small>{period} performance</small></div><div className="mini-bars">{[32,62,46,78,52,88,69].map((h,i)=><i key={i} style={{height:`${h}%`}} />)}</div></section><section className="report-grid"><ReportCard icon={<TrendingUp/>} label="Total spent" value={money(walletStats.totalSpent)} tone='negative'/><ReportCard icon={<BarChart3/>} label="Total capital" value={money(periodStats.totalInvested)}/><ReportCard icon={<Crown/>} label="Best game" value={topGames[0]?.[0] || 'No sales'}/><ReportCard icon={<RotateCcw/>} label="Unrecovered" value={unrecovered.length}/></section><section className="report-card"><h3>Top Games</h3>{topGames.length?topGames.map(([name,total],i)=><div className="rank-row" key={name}><span>#{i+1}</span><strong>{name}</strong><b>{money(total)}</b></div>):<p className="empty-line">No sales yet.</p>}</section><section className="report-card"><h3>Reset Schedule</h3>{resetList.length?resetList.map((account)=><div className="rank-row" key={account.id}><CalendarDays size={16}/><strong>{account.email}</strong><b>{account.nextDeactivation}</b></div>):<p className="empty-line">No reset dates yet.</p>}</section></div>;
+  return <div className="nexus-page reports-page fade-in"><header className="page-top"></header><div className="control-row" style={{marginBottom:12}}><div className="chip-scroll">{['today','week','month','all time'].map(p=><button key={p} className={period===p?'active':''} onClick={()=>setPeriod(p)}>{p}</button>)}</div><button className="icon-shell" onClick={downloadReport}><Download size={18}/></button></div><section className="report-hero"><div><span>Sales revenue</span><strong>{money(periodStats.revenue)}</strong><small>{period} performance</small></div><div className="mini-bars">{[32,62,46,78,52,88,69].map((h,i)=><i key={i} style={{height:`${h}%`}} />)}</div></section><section className="report-grid"><ReportCard icon={<TrendingUp/>} label="Total spent" value={money(periodStats.totalSpent)} tone='negative'/><ReportCard icon={<BarChart3/>} label="Total capital" value={money(periodStats.totalInvested)}/><ReportCard icon={<Crown/>} label="Best game" value={topGames[0]?.[0] || 'No sales'}/><ReportCard icon={<RotateCcw/>} label="Unrecovered" value={unrecovered.length}/></section><section className="report-card"><h3>Top Games</h3>{topGames.length?topGames.map(([name,total],i)=><div className="rank-row" key={name}><span>#{i+1}</span><strong>{name}</strong><b>{money(total)}</b></div>):<p className="empty-line">No sales yet.</p>}</section><section className="report-card"><h3>Reset Schedule</h3>{resetList.length?resetList.map((account)=><div className="rank-row" key={account.id}><CalendarDays size={16}/><strong>{account.email}</strong><b>{account.nextDeactivation}</b></div>):<p className="empty-line">No reset dates yet.</p>}</section></div>;
 };
 const ReportCard = ({ icon, label, value, tone='' }) => <div className={`report-mini ${tone}`}><span>{icon}</span><small>{label}</small><strong>{value}</strong></div>;
 export default Reports;
