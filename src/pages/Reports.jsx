@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { BarChart3, Crown, CalendarDays, Download, RotateCcw, TrendingUp, TrendingDown } from 'lucide-react';
+import { BarChart3, Crown, CalendarDays, Download, RotateCcw, TrendingUp, TrendingDown, Wallet } from 'lucide-react';
 import { useStore } from '../context/StoreContext';
 import './Reports.css';
 
@@ -18,7 +18,7 @@ const isInPeriod = (dateStr, period) => {
 };
 
 const Reports = () => {
-  const { accounts, transactions } = useStore();
+  const { accounts, transactions, walletStats } = useStore();
   const [period, setPeriod] = useState('month');
 
   const filteredTxs = useMemo(() => transactions.filter((tx) => isInPeriod(tx.date, period)), [transactions, period]);
@@ -80,6 +80,7 @@ const Reports = () => {
     lines.push(`Total spent:   ${money(periodStats.totalSpent)}`);
     lines.push(`Account profit: ${money(periodStats.accountProfit)}`);
     lines.push(`Account loss:   ${money(periodStats.accountLoss)}`);
+    lines.push(`Wallet balance: ${money(walletStats.balance)}`);
     lines.push(`Unrecovered:   ${unrecovered.length} account(s)`);
     lines.push('');
     lines.push('TOP GAMES');
@@ -110,7 +111,7 @@ const Reports = () => {
     URL.revokeObjectURL(url);
   };
 
-  return <div className="nexus-page reports-page fade-in"><header className="page-top"></header><div className="control-row" style={{marginBottom:12}}><div className="chip-scroll">{['today','week','month','all time'].map(p=><button key={p} className={period===p?'active':''} onClick={()=>setPeriod(p)}>{p}</button>)}</div><button className="icon-shell" onClick={downloadReport}><Download size={18}/></button></div><section className="report-hero"><div><span>Sales revenue</span><strong>{money(periodStats.revenue)}</strong><small>{period} performance</small></div><div className="mini-bars">{[32,62,46,78,52,88,69].map((h,i)=><i key={i} style={{height:`${h}%`}} />)}</div></section><section className="report-grid"><ReportCard icon={<TrendingUp/>} label="Total spent" value={money(periodStats.totalSpent)} tone='negative'/><ReportCard icon={<BarChart3/>} label="Total capital" value={money(periodStats.totalInvested)}/><ReportCard icon={<TrendingUp/>} label="Profit" value={money(periodStats.accountProfit)} tone='positive'/><ReportCard icon={<TrendingDown/>} label="Loss" value={money(periodStats.accountLoss)} tone='negative'/><ReportCard icon={<Crown/>} label="Best game" value={topGames[0]?.[0] || 'No sales'}/><ReportCard icon={<RotateCcw/>} label="Unrecovered" value={unrecovered.length}/></section><section className="report-card"><h3>Top Games</h3>{topGames.length?topGames.map(([name,total],i)=><div className="rank-row" key={name}><span>#{i+1}</span><strong>{name}</strong><b>{money(total)}</b></div>):<p className="empty-line">No sales yet.</p>}</section><section className="report-card"><h3>Reset Schedule</h3>{resetList.length?resetList.map((account)=><div className="rank-row" key={account.id}><CalendarDays size={16}/><strong>{account.email}</strong><b>{account.nextDeactivation}</b></div>):<p className="empty-line">No reset dates yet.</p>}</section></div>;
+  return <div className="nexus-page reports-page fade-in"><header className="page-top"></header><div className="control-row" style={{marginBottom:12}}><div className="chip-scroll">{['today','week','month','all time'].map(p=><button key={p} className={period===p?'active':''} onClick={()=>setPeriod(p)}>{p}</button>)}</div><button className="icon-shell" onClick={downloadReport}><Download size={18}/></button></div><section className="report-hero"><div><span>Sales revenue</span><strong>{money(periodStats.revenue)}</strong><small>{period} performance</small></div><div className="mini-bars">{[32,62,46,78,52,88,69].map((h,i)=><i key={i} style={{height:`${h}%`}} />)}</div></section><section className="report-grid"><ReportCard icon={<TrendingUp/>} label="Total spent" value={money(periodStats.totalSpent)} tone='negative'/><ReportCard icon={<BarChart3/>} label="Total capital" value={money(periodStats.totalInvested)}/><ReportCard icon={<TrendingUp/>} label="Profit" value={money(periodStats.accountProfit)} tone='positive'/><ReportCard icon={<TrendingDown/>} label="Loss" value={money(periodStats.accountLoss)} tone='negative'/><ReportCard icon={<Wallet/>} label="Wallet balance" value={money(walletStats.balance)}/><ReportCard icon={<Crown/>} label="Best game" value={topGames[0]?.[0] || 'No sales'}/><ReportCard icon={<RotateCcw/>} label="Unrecovered" value={unrecovered.length}/></section><section className="report-card"><h3>Top Games</h3>{topGames.length?topGames.map(([name,total],i)=><div className="rank-row" key={name}><span>#{i+1}</span><strong>{name}</strong><b>{money(total)}</b></div>):<p className="empty-line">No sales yet.</p>}</section><section className="report-card"><h3>Reset Schedule</h3>{resetList.length?resetList.map((account)=><div className="rank-row" key={account.id}><CalendarDays size={16}/><strong>{account.email}</strong><b>{account.nextDeactivation}</b></div>):<p className="empty-line">No reset dates yet.</p>}</section></div>;
 };
 const ReportCard = ({ icon, label, value, tone='' }) => <div className={`report-mini ${tone}`}><span>{icon}</span><small>{label}</small><strong>{value}</strong></div>;
 export default Reports;
