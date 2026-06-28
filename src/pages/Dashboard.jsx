@@ -217,7 +217,7 @@ const Dashboard = ({ onAction }) => {
             const Icon = action.icon;
             return (
               <button key={action.label} className="nexus-action" onClick={action.onClick}>
-                <span><Icon size={22} /></span>
+                <span><Icon size={18} /></span>
                 <strong>{action.label}</strong>
               </button>
             );

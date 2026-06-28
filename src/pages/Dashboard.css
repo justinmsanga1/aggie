@@ -205,7 +205,7 @@
 .quick-action-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
+  gap: 8px;
 }
 
 .nexus-action {
@@ -214,7 +214,7 @@
   color: var(--text-secondary);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   align-items: center;
   min-width: 0;
 }
@@ -222,7 +222,7 @@
 .nexus-action span {
   width: 100%;
   aspect-ratio: 1;
-  border-radius: 14px;
+  border-radius: 12px;
   display: grid;
   place-items: center;
   background: rgba(17, 19, 24, 0.92);
@@ -244,7 +244,7 @@
 }
 
 .nexus-action strong {
-  font-size: 11px;
+  font-size: 10px;
   line-height: 1.1;
   white-space: nowrap;
 }
