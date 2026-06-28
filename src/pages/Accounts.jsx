@@ -15,6 +15,7 @@ const Accounts = ({ onViewDetails }) => {
   const [newGameNames, setNewGameNames] = useState(['']);
   const [saving, setSaving] = useState(false);
   const [showAll, setShowAll] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(null);
   const openAddAccount = () => { setEditingAccount(null); setSelectedGames([]); setNewGameNames(['']); setOpen(true); };
   const openEditAccount = (account) => { setEditingAccount(account); setSelectedGames([...account.games]); setNewGameNames(['']); setOpen(true); };
 
@@ -106,7 +107,7 @@ const Accounts = ({ onViewDetails }) => {
           <p className="empty-line">No accounts yet. Tap Buy / Add Account to create your first one.</p>
         ) : visible.map(({ account, stats, names }) => (
           <article key={account.id} className="account-card" onClick={() => onViewDetails(account.id)}>
-            <div className="account-head"><div><strong>{account.email}</strong><span>{account.region} - {account.condition}</span></div><div className="account-actions"><button className="icon-shell" onClick={(e) => { e.stopPropagation(); openEditAccount(account); }} title="Edit"><Pencil size={16}/></button><button className="icon-shell" onClick={(e) => { e.stopPropagation(); if (confirm('Delete this account and all its data?')) deleteAccount(account.id); }} title="Delete"><Trash2 size={16}/></button></div></div>
+            <div className="account-head"><div><strong>{account.email}</strong><span>{account.region} - {account.condition}</span></div><div className="account-actions"><button className="icon-shell" onClick={(e) => { e.stopPropagation(); openEditAccount(account); }} title="Edit"><Pencil size={16}/></button><button className="icon-shell" onClick={(e) => { e.stopPropagation(); setConfirmDelete(account); }} title="Delete"><Trash2 size={16}/></button></div></div>
             <div className="game-chips">{names.slice(0,3).map((name)=><span key={name}>{name}</span>)}{names.length>3 && <span>+{names.length-3}</span>}</div>
             <div className="slot-map"><SlotLine label="PS4" slots={account.slots.ps4}/><SlotLine label="PS5" slots={account.slots.ps5}/></div>
             <div className="account-money"><div><small>Invested</small><b>{money(stats.totalInvested)}</b></div><div><small>Revenue</small><b>{money(account.revenue)}</b></div><div><small>P/L</small><b className={stats.profit>=0?'positive':'negative'}>{money(stats.profit)}</b></div><div><small>PSN left</small><b>{money(stats.psnBalance)}</b></div></div>
@@ -119,6 +120,19 @@ const Accounts = ({ onViewDetails }) => {
         )}
       </section>
     </div>
+
+      {confirmDelete && (
+        <div className="modal-overlay" onClick={() => setConfirmDelete(null)}>
+          <div className="modal-dialog" onClick={(e) => e.stopPropagation()}>
+            <h3>Delete account?</h3>
+            <p>This will permanently delete <strong>{confirmDelete.email}</strong> and all its transactions, slots, and games data.</p>
+            <div className="modal-actions">
+              <button className="modal-btn modal-btn-cancel" onClick={() => setConfirmDelete(null)}>Cancel</button>
+              <button className="modal-btn modal-btn-danger" onClick={async () => { await deleteAccount(confirmDelete.id); setConfirmDelete(null); }}>Delete</button>
+            </div>
+          </div>
+        </div>
+      )}
   );
 };
 const SlotLine = ({ label, slots }) => <div className="slot-line"><span>{label}</span><div>{slots.map((slot)=><i key={slot.id} className={`${slot.status} ${slot.type}`} title={`${slot.type} ${slot.status}`}/>)}</div></div>;
