@@ -17,7 +17,7 @@ The system has two main sides:
 
 ```text
 Business wallet balance =
-capital added + slot sales + adjustments
+capital added + adjustments
 - account purchases
 - PSN deposits
 - withdrawals

@@ -98,7 +98,7 @@ const computeBusinessBalance = (txs) => {
     }
   });
 
-  return (capitalIn + slotSale + adjustment) - (accountPurchase + psnDeposit + withdrawal + expense);
+  return (capitalIn + adjustment) - (accountPurchase + psnDeposit + withdrawal + expense);
 };
 
 const formatTzs = (value) => new Intl.NumberFormat('en-TZ', {

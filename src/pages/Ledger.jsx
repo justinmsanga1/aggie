@@ -54,7 +54,7 @@ const Ledger = () => {
         </div>
         <strong>{money(walletStats.balance)}</strong>
         <div className="ledger-balance-grid">
-          <div><small>Cash in</small><b>{money(walletStats.capitalIn + walletStats.revenue)}</b></div>
+          <div><small>Cash in</small><b>{money(walletStats.capitalIn + walletStats.adjustment)}</b></div>
           <div><small>Cash out</small><b>{money(walletStats.accountPurchase + walletStats.psnDeposit + walletStats.withdrawal + walletStats.expense)}</b></div>
           <div><small>Locked PSN</small><b>{money(walletStats.psnWalletsBalance)}</b></div>
         </div>
