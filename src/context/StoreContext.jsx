@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { INITIAL_ACCOUNTS, INITIAL_TRANSACTIONS, GAMES, ADMINS } from '../data/mock-data';
 import { supabase, hasSupabaseConfig } from '../lib/supabase';
 
@@ -98,7 +98,7 @@ const computeBusinessBalance = (txs) => {
     }
   });
 
-  return Math.max(0, (capitalIn + adjustment) - (accountPurchase + psnDeposit + withdrawal + expense));
+  return Math.max(0, (capitalIn + slotSale + adjustment) - (accountPurchase + psnDeposit + withdrawal + expense));
 };
 
 const formatTzs = (value) => new Intl.NumberFormat('en-TZ', {
@@ -140,6 +140,7 @@ export const StoreProvider = ({ children }) => {
   const [dbReady, setDbReady] = useState(false);
   const [dbError, setDbError] = useState('');
   const [loading, setLoading] = useState(hasSupabaseConfig);
+  const loadIdRef = useRef(0);
 
   const logActivity = async (action, entityType, entityId, metadata = {}) => {
     if (!supabase || !dbReady) return;
@@ -162,6 +163,7 @@ export const StoreProvider = ({ children }) => {
 
   const loadFromSupabase = async ({ silent = false } = {}) => {
     if (!supabase) return;
+    const thisLoad = ++loadIdRef.current;
     if (!silent) setLoading(true);
     setDbError('');
     try {
@@ -173,6 +175,8 @@ export const StoreProvider = ({ children }) => {
           .order('created_at', { ascending: false }),
         supabase.from('money_transactions').select('*').order('created_at', { ascending: false }),
       ]);
+
+      if (thisLoad !== loadIdRef.current) return;
 
       if (gamesResult.error) throw gamesResult.error;
       if (accountsResult.error) throw accountsResult.error;
@@ -344,7 +348,7 @@ export const StoreProvider = ({ children }) => {
         await logActivity(`transaction_${data.type}`, 'transaction', inserted.id, { type: data.type, amount, accountId: data.accountId });
         setDbError('');
         setDbReady(true);
-        loadFromSupabase({ silent: true });
+        await loadFromSupabase({ silent: true });
         return uiTx;
       } catch (error) {
         const rlsBlocked = error?.code === '42501';
@@ -558,7 +562,7 @@ export const StoreProvider = ({ children }) => {
         const account = await finishAccount(accountId);
         await logActivity('account_created', 'account', accountId, { email });
         setDbError('');
-        loadFromSupabase({ silent: true });
+        await loadFromSupabase({ silent: true });
         return account;
       } catch (error) {
         if (String(error?.message || '').includes('Not enough money')) throw error;

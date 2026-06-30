@@ -78,7 +78,7 @@ const Dashboard = ({ onAction }) => {
       }
     });
 
-    const balance = Math.max(0, capitalIn + adjustment - accountPurchase - psnDeposit - withdrawal - expense);
+    const balance = Math.max(0, capitalIn + slotSale + adjustment - accountPurchase - psnDeposit - withdrawal - expense);
     return {
       capitalIn, accountPurchase, psnDeposit, slotSale, withdrawal, expense, adjustment,
       totalInvested: capitalIn,
