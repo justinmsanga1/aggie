@@ -1,0 +1,9 @@
+.env
+__pycache__/
+*.pyc
+.venv/
+data/
+uploads/
+outputs/
+*.log
+localtunnel*.log

@@ -1,0 +1,32 @@
+services:
+  - type: web
+    name: aggie-whatsapp-assistant
+    env: python
+    region: frankfurt
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    autoDeploy: true
+    envVars:
+      - key: META_VERIFY_TOKEN
+        value: aggie-helper-webhook-2026
+      - key: META_GRAPH_VERSION
+        value: v23.0
+      - key: CLAUDE_MODEL
+        value: claude-sonnet-4-5
+      - key: APP_BASE_URL
+        sync: false
+      - key: META_ACCESS_TOKEN
+        sync: false
+      - key: META_PHONE_NUMBER_ID
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: DATABASE_PATH
+        value: /tmp/agent.sqlite3
+      - key: UPLOAD_DIR
+        value: /tmp/uploads
+      - key: OUTPUT_DIR
+        value: /tmp/outputs
+      - key: KNOWLEDGE_DIR
+        value: ./knowledge
