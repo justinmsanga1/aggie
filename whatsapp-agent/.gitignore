@@ -7,3 +7,6 @@ uploads/
 outputs/
 *.log
 localtunnel*.log
+
+.vercel/
+.env.local
