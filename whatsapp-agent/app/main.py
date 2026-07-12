@@ -37,6 +37,21 @@ async def debug_identity() -> dict[str, str]:
     }
 
 
+@app.get("/debug/config")
+async def debug_config() -> dict[str, bool | str]:
+    return {
+        "assistant": "Aggie",
+        "meta_verify_token_set": bool(settings.meta_verify_token),
+        "meta_access_token_set": bool(settings.meta_access_token),
+        "meta_phone_number_id_set": bool(settings.meta_phone_number_id),
+        "anthropic_api_key_set": bool(settings.anthropic_api_key),
+        "database_path": str(settings.database_path),
+        "upload_dir": str(settings.upload_dir),
+        "output_dir": str(settings.output_dir),
+        "knowledge_dir": str(settings.knowledge_dir),
+    }
+
+
 @app.get("/webhook", response_class=PlainTextResponse)
 async def verify_webhook(
     hub_mode: str = Query(alias="hub.mode"),

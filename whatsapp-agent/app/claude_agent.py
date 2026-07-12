@@ -36,7 +36,7 @@ class ClaudeAgent:
     def __init__(self, settings: Settings, memory: ConversationMemory):
         self.settings = settings
         self.memory = memory
-        self.client = AsyncAnthropic(api_key=settings.anthropic_api_key)
+        self.client: AsyncAnthropic | None = None
 
     async def answer(
         self,
@@ -52,7 +52,13 @@ class ClaudeAgent:
         user_content = self._build_user_content(user_text, attachments or [])
         messages.append({"role": "user", "content": user_content})
 
-        response = await self.client.messages.create(
+        if not self.settings.anthropic_api_key:
+            return (
+                "Sijapata Claude API key kwenye server bado. "
+                "Weka ANTHROPIC_API_KEY kwenye Vercel environment variables kwanza."
+            )
+
+        response = await self._client().messages.create(
             model=self.settings.claude_model,
             max_tokens=1600,
             system=system,
@@ -74,6 +80,11 @@ class ClaudeAgent:
         if knowledge.strip():
             parts.append(f"Private knowledge base:\n{knowledge.strip()}")
         return "\n\n".join(parts)
+
+    def _client(self) -> AsyncAnthropic:
+        if self.client is None:
+            self.client = AsyncAnthropic(api_key=self.settings.anthropic_api_key)
+        return self.client
 
     def _build_user_content(
         self,
