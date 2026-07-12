@@ -1,6 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "echo \"No frontend build required\"",
+  "buildCommand": "mkdir -p dist && echo \"Aggie WhatsApp Assistant API\" > dist/index.txt",
+  "outputDirectory": "dist",
   "rewrites": [
     {
       "source": "/(.*)",
