@@ -76,8 +76,26 @@ def should_create_clean_excel(text: str, attachments: list[dict[str, Any]]) -> b
             "weka sawa",
         ]
     )
-    has_excel = any(Path(item["path"]).suffix.lower() in {".xlsx", ".xlsm"} for item in attachments)
-    return wants_edit and has_excel
+    return wants_edit and has_excel_attachment(attachments)
+
+
+def has_excel_attachment(attachments: list[dict[str, Any]]) -> bool:
+    return any(_is_excel_attachment(item) for item in attachments)
+
+
+def _is_excel_attachment(attachment: dict[str, Any]) -> bool:
+    path = Path(attachment["path"])
+    mime_type = attachment.get("mime_type") or ""
+    filename = str(attachment.get("filename") or path.name).lower()
+    return (
+        path.suffix.lower() in {".xlsx", ".xlsm"}
+        or filename.endswith((".xlsx", ".xlsm"))
+        or mime_type
+        in {
+            XLSX_MIME_TYPE,
+            "application/vnd.ms-excel.sheet.macroenabled.12",
+        }
+    )
 
 
 def _clean_sheet(sheet: Any) -> None:

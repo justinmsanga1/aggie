@@ -7,7 +7,7 @@ from fastapi.responses import PlainTextResponse
 
 from app.claude_agent import ClaudeAgent
 from app.config import get_settings
-from app.documents import XLSX_MIME_TYPE, clean_excel_workbook, should_create_clean_excel
+from app.documents import XLSX_MIME_TYPE, clean_excel_workbook, has_excel_attachment
 from app.memory import ConversationMemory
 from app.whatsapp import WhatsAppClient
 
@@ -98,9 +98,9 @@ async def _handle_message(message: dict[str, Any]) -> None:
         )
         return
 
-    if should_create_clean_excel(text, attachments):
+    if has_excel_attachment(attachments):
         excel_attachment = next(
-            item for item in attachments if Path(item["path"]).suffix.lower() in {".xlsx", ".xlsm"}
+            item for item in attachments if _is_excel_path_or_mime(item)
         )
         cleaned_file = clean_excel_workbook(Path(excel_attachment["path"]), settings.output_dir)
         await whatsapp.send_document(
@@ -117,6 +117,14 @@ async def _handle_message(message: dict[str, Any]) -> None:
         await whatsapp.send_text(
             wa_id,
             "Done, nimetuma file mpya hapo juu. Nimeondoa styling nzito/rangi, nimepanga columns, na nimeweka sheet iwe rahisi kusoma.",
+        )
+        return
+
+    if _looks_like_missing_file_followup(text):
+        await whatsapp.send_text(
+            wa_id,
+            "Pole, nitumie ile Excel file tena hapa na nita-clean kisha nirudishe kama downloadable file. "
+            "Vercel haihifadhi file ya zamani kwa muda mrefu, so nahitaji attachment tena.",
         )
         return
 
@@ -137,3 +145,40 @@ def _extract_text(message: dict[str, Any]) -> str:
     if message.get("type") == "text":
         return message.get("text", {}).get("body", "").strip()
     return ""
+
+
+def _is_excel_path_or_mime(attachment: dict[str, Any]) -> bool:
+    path = Path(attachment["path"])
+    mime_type = attachment.get("mime_type") or ""
+    filename = str(attachment.get("filename") or path.name).lower()
+    return (
+        path.suffix.lower() in {".xlsx", ".xlsm"}
+        or filename.endswith((".xlsx", ".xlsm"))
+        or mime_type
+        in {
+            XLSX_MIME_TYPE,
+            "application/vnd.ms-excel.sheet.macroenabled.12",
+        }
+    )
+
+
+def _looks_like_missing_file_followup(text: str) -> bool:
+    lowered = text.lower()
+    if not lowered:
+        return False
+    mentions_file = any(word in lowered for word in ["file", "excel", "download", "attachment"])
+    missing = any(
+        phrase in lowered
+        for phrase in [
+            "sija",
+            "sioni",
+            "iko wapi",
+            "wapi",
+            "mbona",
+            "not received",
+            "didn't receive",
+            "no file",
+            "where",
+        ]
+    )
+    return mentions_file and missing
