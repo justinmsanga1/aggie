@@ -15,9 +15,9 @@ class Settings(BaseSettings):
     claude_model: str = Field(default="claude-sonnet-4-5", alias="CLAUDE_MODEL")
 
     app_base_url: str = Field(default="http://localhost:8000", alias="APP_BASE_URL")
-    database_path: Path = Field(default=Path("./data/agent.sqlite3"), alias="DATABASE_PATH")
-    upload_dir: Path = Field(default=Path("./uploads"), alias="UPLOAD_DIR")
-    output_dir: Path = Field(default=Path("./outputs"), alias="OUTPUT_DIR")
+    database_path: Path = Field(default=Path("/tmp/agent.sqlite3"), alias="DATABASE_PATH")
+    upload_dir: Path = Field(default=Path("/tmp/uploads"), alias="UPLOAD_DIR")
+    output_dir: Path = Field(default=Path("/tmp/outputs"), alias="OUTPUT_DIR")
     knowledge_dir: Path = Field(default=Path("./knowledge"), alias="KNOWLEDGE_DIR")
     max_history_messages: int = Field(default=12, alias="MAX_HISTORY_MESSAGES")
 
