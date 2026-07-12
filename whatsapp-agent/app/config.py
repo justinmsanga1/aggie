@@ -1,4 +1,5 @@
 from functools import lru_cache
+import os
 from pathlib import Path
 
 from pydantic import Field
@@ -27,7 +28,17 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     settings = Settings()
+    if os.environ.get("VERCEL"):
+        settings.database_path = _vercel_safe_path(settings.database_path, "agent.sqlite3")
+        settings.upload_dir = _vercel_safe_path(settings.upload_dir, "uploads")
+        settings.output_dir = _vercel_safe_path(settings.output_dir, "outputs")
     settings.database_path.parent.mkdir(parents=True, exist_ok=True)
     settings.upload_dir.mkdir(parents=True, exist_ok=True)
     settings.output_dir.mkdir(parents=True, exist_ok=True)
     return settings
+
+
+def _vercel_safe_path(path: Path, fallback_name: str) -> Path:
+    if str(path).startswith("/tmp/"):
+        return path
+    return Path("/tmp") / fallback_name
