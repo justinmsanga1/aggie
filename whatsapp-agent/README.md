@@ -139,7 +139,7 @@ KNOWLEDGE_DIR
 https://YOUR-RENDER-SERVICE.onrender.com/webhook
 ```
 
-Then keep `messages` subscribed.
+Then keep `messages` subscribed. Use the permanent Vercel URL for Meta webhooks.
 
 ## Notes
 
