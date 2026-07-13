@@ -101,6 +101,12 @@ async def _handle_message(message: dict[str, Any]) -> None:
         if message_type == "document":
             text = text or media.get("caption", "")
         attachments.append(await whatsapp.download_media(media["id"], filename))
+        memory.set_pending_file(
+            wa_id,
+            media["id"],
+            filename or attachments[-1].get("filename"),
+            attachments[-1].get("mime_type"),
+        )
 
     if message_type not in {"text", "image", "document"}:
         await whatsapp.send_text(
@@ -109,6 +115,26 @@ async def _handle_message(message: dict[str, Any]) -> None:
             "Send one of those and tell me what you want done.",
         )
         return
+
+    if message_type == "text" and not attachments and _looks_like_file_action(text):
+        pending_file = memory.get_pending_file(wa_id)
+        if pending_file:
+            try:
+                attachments.append(
+                    await whatsapp.download_media(
+                        pending_file["media_id"],
+                        pending_file.get("filename"),
+                    )
+                )
+                memory.add_message(wa_id, "user", text)
+            except Exception:
+                logger.exception("Failed to reload pending WhatsApp file")
+                memory.clear_pending_file(wa_id)
+                await whatsapp.send_text(
+                    wa_id,
+                    "File ya mwanzo ime-expire kabla sijai-download tena. Nitume tena hiyo Excel na instruction pamoja.",
+                )
+                return
 
     if len(attachments) >= 2 and _wants_comparison(text):
         comparison_text = await agent.answer(
@@ -326,6 +352,7 @@ async def _handle_message(message: dict[str, Any]) -> None:
                 wa_id,
                 "Done, nimetuma file mpya. Nimeweka heading, filter, freeze pane, na columns zisomeke vizuri.",
             )
+        memory.clear_pending_file(wa_id)
         return
 
     if _looks_like_missing_file_followup(text):
@@ -411,6 +438,43 @@ def _looks_like_missing_file_followup(text: str) -> bool:
         ]
     )
     return mentions_file and missing
+
+
+def _looks_like_file_action(text: str) -> bool:
+    lowered = text.lower()
+    if not lowered.strip():
+        return False
+    return any(
+        word in lowered
+        for word in [
+            "excel",
+            "file",
+            "column",
+            "columns",
+            "summary",
+            "summar",
+            "report",
+            "delete",
+            "remove",
+            "futa",
+            "ondoa",
+            "quantity",
+            "quantiti",
+            "simu",
+            "product",
+            "stock",
+            "panga",
+            "safisha",
+            "rekebisha",
+            "format",
+            "polish",
+            "clean",
+            "sort",
+            "total",
+            "jumla",
+            "chini",
+        ]
+    )
 
 
 def _wants_pdf(text: str) -> bool:
