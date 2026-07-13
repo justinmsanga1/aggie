@@ -126,6 +126,15 @@ async def _handle_message(message: dict[str, Any]) -> None:
                         pending_file.get("filename"),
                     )
                 )
+                if pending_file.get("filename"):
+                    attachments[-1]["filename"] = pending_file["filename"]
+                if pending_file.get("mime_type"):
+                    attachments[-1]["mime_type"] = pending_file["mime_type"]
+                if _looks_like_excel_action(text) and not _is_excel_path_or_mime(attachments[-1]):
+                    attachments[-1]["filename"] = _ensure_xlsx_filename(
+                        str(attachments[-1].get("filename") or Path(attachments[-1]["path"]).name)
+                    )
+                    attachments[-1]["mime_type"] = XLSX_MIME_TYPE
                 memory.add_message(wa_id, "user", text)
             except Exception:
                 logger.exception("Failed to reload pending WhatsApp file")
@@ -311,6 +320,15 @@ async def _handle_excel_attachment(
     attachments: list[dict[str, Any]],
 ) -> bool:
     if not has_excel_attachment(attachments):
+        if attachments and _looks_like_excel_action(text):
+            attachments[0]["filename"] = _ensure_xlsx_filename(
+                str(attachments[0].get("filename") or Path(attachments[0]["path"]).name)
+            )
+            attachments[0]["mime_type"] = XLSX_MIME_TYPE
+        else:
+            return False
+
+    if not has_excel_attachment(attachments):
         return False
 
     excel_attachment = next(
@@ -324,42 +342,53 @@ async def _handle_excel_attachment(
         )
         return True
 
-    plan = await agent.plan_excel_edits(wa_id, instruction_text, excel_attachment)
-    if plan.get("can_execute") is False:
+    await whatsapp.send_text(wa_id, "Nimeipata Excel. Naifanyia kazi sasa...")
+    logger.info("Excel edit started for %s with file %s", wa_id, excel_attachment.get("filename"))
+    try:
+        plan = await agent.plan_excel_edits(wa_id, instruction_text, excel_attachment)
+        if plan.get("can_execute") is False:
+            await whatsapp.send_text(
+                wa_id,
+                str(plan.get("question") or "Sijaelewa vizuri nifanye edit gani kwenye Excel. Niambie nibadilishe nini?"),
+            )
+            return True
+
+        edit_result = edit_excel_workbook(
+            Path(excel_attachment["path"]),
+            settings.output_dir,
+            instruction_text=instruction_text,
+            plan=plan,
+        )
+        requested_actions = plan.get("actions") if isinstance(plan.get("actions"), list) else []
+        if requested_actions and not edit_result.applied:
+            await whatsapp.send_text(
+                wa_id,
+                str(plan.get("question") or "Nimefungua Excel, lakini sijaweza kuapply hiyo edit. Niambie column au mabadiliko unayotaka exactly."),
+            )
+            return True
+
+        cleaned_file = edit_result.path
+        applied_text = "; ".join(edit_result.applied)
+        summary = str(plan.get("summary") or "").strip()
+        caption = (
+            "Nime-edit Excel file. Unaweza ku-download hii version hapa."
+            if applied_text
+            else "Nimeformat Excel file na kuongeza heading/format safi. Unaweza ku-download hii version hapa."
+        )
+        await whatsapp.send_document(
+            wa_id,
+            cleaned_file,
+            caption=caption,
+            mime_type=XLSX_MIME_TYPE,
+        )
+        logger.info("Excel edit file sent to %s: %s", wa_id, cleaned_file.name)
+    except Exception:
+        logger.exception("Excel edit failed for %s", wa_id)
         await whatsapp.send_text(
             wa_id,
-            str(plan.get("question") or "Sijaelewa vizuri nifanye edit gani kwenye Excel. Niambie nibadilishe nini?"),
+            "Nimejaribu ku-edit Excel lakini imeshindikana kwenye server. Nitume file hiyo hiyo tena pamoja na instruction kwenye caption moja.",
         )
         return True
-
-    edit_result = edit_excel_workbook(
-        Path(excel_attachment["path"]),
-        settings.output_dir,
-        instruction_text=instruction_text,
-        plan=plan,
-    )
-    requested_actions = plan.get("actions") if isinstance(plan.get("actions"), list) else []
-    if requested_actions and not edit_result.applied:
-        await whatsapp.send_text(
-            wa_id,
-            str(plan.get("question") or "Nimefungua Excel, lakini sijaweza kuapply hiyo edit. Niambie column au mabadiliko unayotaka exactly."),
-        )
-        return True
-
-    cleaned_file = edit_result.path
-    applied_text = "; ".join(edit_result.applied)
-    summary = str(plan.get("summary") or "").strip()
-    caption = (
-        "Nime-edit Excel file. Unaweza ku-download hii version hapa."
-        if applied_text
-        else "Nimeformat Excel file na kuongeza heading/format safi. Unaweza ku-download hii version hapa."
-    )
-    await whatsapp.send_document(
-        wa_id,
-        cleaned_file,
-        caption=caption,
-        mime_type=XLSX_MIME_TYPE,
-    )
     memory.add_message(
         wa_id,
         "assistant",
@@ -416,6 +445,18 @@ def _is_excel_path_or_mime(attachment: dict[str, Any]) -> bool:
             "application/vnd.ms-excel.sheet.macroenabled.12",
         }
     )
+
+
+def _looks_like_excel_action(text: str) -> bool:
+    lowered = text.lower()
+    return any(word in lowered for word in ["excel", "xlsx", "xls", "spreadsheet", "workbook"])
+
+
+def _ensure_xlsx_filename(filename: str) -> str:
+    lowered = filename.lower()
+    if lowered.endswith((".xlsx", ".xlsm", ".xls")):
+        return filename
+    return f"{Path(filename).stem or 'attachment'}.xlsx"
 
 
 def _is_docx_path_or_mime(attachment: dict[str, Any]) -> bool:
