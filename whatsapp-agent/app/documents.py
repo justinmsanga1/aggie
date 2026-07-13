@@ -170,7 +170,7 @@ def verify_excel_result(path: Path, plan: dict[str, Any] | None = None) -> list[
     if not actions:
         return []
     errors: list[str] = []
-    workbook = load_workbook(str(path), data_only=True, read_only=True)
+    workbook = load_workbook(str(path), data_only=True)
     try:
         for action in actions:
             action_type = str(action.get("type", "")).lower().strip()
@@ -515,6 +515,11 @@ def _extract_delete_column_requests(text: str) -> list[str]:
         r"(?:delete|remove|drop|futa|ondoa|toa)\s+([^.;,\n]+?)\s+(?:column|columns|col|safu)",
         r"(?:toa)\s+(?:column|columns|col|safu)\s+(?:ya\s+|yenye\s+)?([^.;,\n]+)",
     ]
+    filler_words = {
+        "the", "a", "an", "ya", "yenye", "called", "named", "from",
+        "kwenye", "sheet", "file", "hii", "hiyo", "ile", "hizo",
+        "zote", "all", "na", "and", "then", "halafu", "kisha",
+    }
     values: list[str] = []
     for pattern in patterns:
         for match in re.finditer(pattern, text, flags=re.IGNORECASE):
@@ -527,7 +532,7 @@ def _extract_delete_column_requests(text: str) -> list[str]:
             parts = re.split(r"\s*(?:,|/|\+|&|\band\b|\bna\b)\s*", raw, flags=re.IGNORECASE)
             for part in parts:
                 cleaned = part.strip(" '\"`:-")
-                if cleaned and cleaned.lower() not in {"the", "column", "columns", "safu"}:
+                if cleaned and cleaned.lower() not in filler_words and len(cleaned) > 1:
                     values.append(cleaned)
     column_mentions = re.findall(
         r"([a-zA-Z0-9 _-]{2,40}?)\s+(?:column|columns|col|safu)\b",
@@ -546,7 +551,7 @@ def _extract_delete_column_requests(text: str) -> list[str]:
             cleaned,
             flags=re.IGNORECASE,
         )[-1].strip(" '\"`:-")
-        if cleaned and cleaned.lower() not in {"the", "column", "columns", "safu"}:
+        if cleaned and cleaned.lower() not in filler_words and len(cleaned) > 1:
             values.append(cleaned)
     return _unique_preserve_order(values)
 
@@ -1075,12 +1080,18 @@ def _add_total_formulas(sheet: Any) -> None:
     if sheet.max_row < 3 or sheet.max_column < 2:
         return
     last_data_row = sheet.max_row
+    if last_data_row > 3:
+        first_cell = sheet.cell(last_data_row, 1).value
+        if isinstance(first_cell, str) and first_cell.strip().upper() == "TOTAL":
+            last_data_row -= 1
+    if last_data_row < 3:
+        return
     total_row = last_data_row + 1
     sheet.cell(total_row, 1).value = "TOTAL"
     sheet.cell(total_row, 1).font = Font(name="Calibri", size=11, bold=True, color="000000")
     for col_idx in range(2, sheet.max_column + 1):
         numeric_count = 0
-        for row_idx in range(3, sheet.max_row + 1):
+        for row_idx in range(3, last_data_row + 1):
             value = sheet.cell(row_idx, col_idx).value
             if isinstance(value, (int, float)):
                 numeric_count += 1

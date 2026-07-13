@@ -99,6 +99,7 @@ async def receive_webhook(request: Request) -> dict[str, str]:
             await _handle_message(message)
         except Exception:
             logger.exception("Failed to handle WhatsApp message")
+            continue
         if message_id:
             memory.mark_message_processed(message_id)
     return {"status": "received"}
@@ -146,10 +147,13 @@ async def _handle_message(message: dict[str, Any]) -> None:
         return
 
     if message_type == "text" and not attachments and _looks_like_file_action(text):
-        if not _looks_like_confirmation(text):
-            memory.set_pending_instruction(wa_id, text)
         pending_job = memory.latest_document_job(wa_id)
         pending_file = memory.get_pending_file(wa_id)
+        if not pending_job and not pending_file:
+            logger.info("No pending file for %s, falling through to chat", wa_id)
+        else:
+            if not _looks_like_confirmation(text):
+                memory.set_pending_instruction(wa_id, text)
         if pending_job and pending_job.get("media_id"):
             try:
                 attachment = await _reload_pending_attachment(pending_job)
@@ -567,7 +571,7 @@ def _job_for_attachment(wa_id: str, attachment: dict[str, Any]) -> dict[str, Any
     latest = memory.latest_document_job(wa_id)
     if latest and latest.get("media_id") == attachment.get("media_id"):
         return latest
-    return latest
+    return None
 
 
 def _iter_messages(payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -590,11 +594,9 @@ def _effective_file_instruction(wa_id: str, text: str) -> str:
         return text.strip()
     pending_instruction = memory.get_pending_instruction(wa_id).strip()
     if pending_instruction:
+        memory.clear_pending_instruction(wa_id)
         return pending_instruction
-    previous = memory.last_user_message(wa_id).strip()
-    if previous.lower().startswith("attached files:"):
-        return ""
-    return previous
+    return ""
 
 
 def _is_excel_path_or_mime(attachment: dict[str, Any]) -> bool:
@@ -662,44 +664,24 @@ def _looks_like_file_action(text: str) -> bool:
     lowered = text.lower()
     if not lowered.strip():
         return False
-    return any(
+    has_file_ref = any(
+        word in lowered
+        for word in ["excel", "xlsx", "xls", "spreadsheet", "workbook", "file"]
+    )
+    has_action = any(
         word in lowered
         for word in [
-            "excel",
-            "file",
-            "column",
-            "columns",
-            "summary",
-            "summar",
-            "report",
-            "delete",
-            "remove",
-            "futa",
-            "ondoa",
-            "quantity",
-            "quantiti",
-            "simu",
-            "product",
-            "stock",
-            "panga",
-            "safisha",
-            "rekebisha",
-            "format",
-            "polish",
-            "clean",
-            "sort",
-            "total",
-            "jumla",
-            "chini",
-            "edit",
-            "fix",
-            "change",
-            "modify",
-            "update",
-            "tengeneza",
-            "hariri",
+            "column", "columns", "delete", "remove", "futa", "ondoa",
+            "sort", "panga", "clean", "safisha", "rekebisha", "format",
+            "summary", "summar", "product summary",
+            "heading", "title", "kichwa",
+            "quantity", "quantiti", "simu", "phone",
+            "total", "jumla", "chini",
+            "edit", "hariri", "tengeneza",
+            "polish", "keep", "rename", "badilisha",
         ]
     )
+    return has_file_ref or has_action
 
 
 def _looks_like_confirmation(text: str) -> bool:
@@ -726,14 +708,12 @@ def _wants_invoice_or_business_document_processing(text: str) -> bool:
         "ankara",
         "delivery note",
         "purchase order",
-        "po",
         "grn",
         "goods received",
         "supplier",
         "stock note",
         "stakabadhi",
         "document",
-        "doc",
     ]
     action_words = [
         "analyze",
