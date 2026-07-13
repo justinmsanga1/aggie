@@ -16,6 +16,7 @@ from app.documents import (
     create_docx_report,
     create_excel_from_text,
     create_pdf_report,
+    clean_docx_document,
     has_excel_attachment,
 )
 from app.memory import ConversationMemory
@@ -106,6 +107,38 @@ async def _handle_message(message: dict[str, Any]) -> None:
             "I can help with text, images, PDFs, Word, Excel, and CSV files first. "
             "Send one of those and tell me what you want done.",
         )
+        return
+
+    if len(attachments) >= 2 and _wants_comparison(text):
+        comparison_text = await agent.answer(
+            wa_id=wa_id,
+            user_text=(
+                "Compare the attached documents carefully for a stock manager. "
+                "Find matching items, missing items, quantity differences, price/total differences, "
+                "date/document number differences, supplier/customer differences, and recommended action. "
+                "Return clean markdown with sections: Summary, Matches, Differences, Missing Items, Risks, Recommended Action. "
+                "Do not invent values.\n\n"
+                f"User instruction: {text or 'Compare these documents'}"
+            ),
+            attachments=attachments,
+        )
+        if _wants_pdf(text):
+            comparison_file = create_pdf_report(comparison_text, settings.output_dir, "Document Comparison")
+            await whatsapp.send_document(
+                wa_id,
+                comparison_file,
+                caption="Nimelinganisha documents na kuandaa PDF report.",
+                mime_type=PDF_MIME_TYPE,
+            )
+        else:
+            comparison_file = create_excel_from_text(comparison_text, settings.output_dir, "Document Comparison")
+            await whatsapp.send_document(
+                wa_id,
+                comparison_file,
+                caption="Nimelinganisha documents na kuandaa Excel comparison tracker.",
+                mime_type=XLSX_MIME_TYPE,
+            )
+        await whatsapp.send_text(wa_id, "Done, nimelinganisha documents na nimetuma file hapo juu.")
         return
 
     if attachments and _wants_invoice_or_business_document_processing(text):
@@ -213,6 +246,23 @@ async def _handle_message(message: dict[str, Any]) -> None:
             await whatsapp.send_text(wa_id, "Done, nimeconvert/organize data kuwa Excel.")
             return
 
+    if attachments and _wants_word_cleanup(text):
+        docx_attachment = next((item for item in attachments if _is_docx_path_or_mime(item)), None)
+        if docx_attachment:
+            cleaned_doc = clean_docx_document(
+                Path(docx_attachment["path"]),
+                settings.output_dir,
+                instruction_text=text,
+            )
+            await whatsapp.send_document(
+                wa_id,
+                cleaned_doc,
+                caption="Nime-clean na kuformat Word document. Unaweza ku-download hapa.",
+                mime_type=DOCX_MIME_TYPE,
+            )
+            await whatsapp.send_text(wa_id, "Done, nimetuma Word document mpya hapo juu.")
+            return
+
     if has_excel_attachment(attachments):
         excel_attachment = next(
             item for item in attachments if _is_excel_path_or_mime(item)
@@ -278,6 +328,17 @@ def _is_excel_path_or_mime(attachment: dict[str, Any]) -> bool:
             XLSX_MIME_TYPE,
             "application/vnd.ms-excel.sheet.macroenabled.12",
         }
+    )
+
+
+def _is_docx_path_or_mime(attachment: dict[str, Any]) -> bool:
+    path = Path(attachment["path"])
+    mime_type = attachment.get("mime_type") or ""
+    filename = str(attachment.get("filename") or path.name).lower()
+    return (
+        path.suffix.lower() == ".docx"
+        or filename.endswith(".docx")
+        or mime_type == DOCX_MIME_TYPE
     )
 
 
@@ -351,6 +412,42 @@ def _wants_invoice_or_business_document_processing(text: str) -> bool:
     return any(word in lowered for word in document_words) and any(
         word in lowered for word in action_words
     )
+
+
+def _wants_comparison(text: str) -> bool:
+    lowered = text.lower()
+    return any(
+        word in lowered
+        for word in [
+            "compare",
+            "comparison",
+            "linganisha",
+            "tofauti",
+            "difference",
+            "match",
+            "reconcile",
+            "reconciliation",
+            "hakiki",
+        ]
+    )
+
+
+def _wants_word_cleanup(text: str) -> bool:
+    lowered = text.lower()
+    wants_word = "word" in lowered or "docx" in lowered or "document" in lowered
+    wants_cleanup = any(
+        word in lowered
+        for word in [
+            "clean",
+            "format",
+            "edit",
+            "panga",
+            "safisha",
+            "rekebisha",
+            "weka sawa",
+        ]
+    )
+    return wants_word and wants_cleanup
 
 
 def _wants_report_file(text: str) -> bool:

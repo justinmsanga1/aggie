@@ -83,6 +83,37 @@ def create_docx_report(content: str, output_dir: Path, title: str = "Aggie Repor
     return target
 
 
+def clean_docx_document(source: Path, output_dir: Path, instruction_text: str = "") -> Path:
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    target = output_dir / f"{source.stem}-cleaned-{timestamp}.docx"
+    doc = Document(str(source))
+    title = _clean_heading(_extract_heading(instruction_text, source)).title()
+    if doc.paragraphs:
+        first = doc.paragraphs[0]
+        if first.text.strip().lower() != title.lower():
+            first.insert_paragraph_before(title, style="Title")
+    else:
+        doc.add_heading(title, 0)
+
+    for paragraph in doc.paragraphs:
+        if not paragraph.text.strip():
+            continue
+        for run in paragraph.runs:
+            run.font.name = "Calibri"
+            run.font.size = None
+
+    for table in doc.tables:
+        table.style = "Table Grid"
+        if table.rows:
+            for cell in table.rows[0].cells:
+                for paragraph in cell.paragraphs:
+                    for run in paragraph.runs:
+                        run.bold = True
+
+    doc.save(str(target))
+    return target
+
+
 def create_pdf_report(content: str, output_dir: Path, title: str = "Aggie Report") -> Path:
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     target = output_dir / f"aggie-report-{timestamp}.pdf"
@@ -115,6 +146,7 @@ def create_excel_from_text(content: str, output_dir: Path, title: str = "Organiz
     for row in rows:
         sheet.append(row)
     _clean_sheet(sheet, title)
+    _add_total_formulas(sheet)
     workbook.save(str(target))
     return target
 
@@ -196,6 +228,7 @@ def _clean_sheet(sheet: Any, heading: str) -> None:
             cell.font = Font(name=cell.font.name or "Calibri", size=11, bold=True, color="000000")
             cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
         sheet.auto_filter.ref = f"A2:{get_column_letter(sheet.max_column)}{sheet.max_row}"
+        _add_total_formulas(sheet)
 
 
 def _extract_heading(instruction_text: str, source: Path) -> str:
@@ -258,6 +291,27 @@ def _auto_size_columns(sheet: Any) -> None:
             value = "" if cell.value is None else str(cell.value)
             max_len = max(max_len, min(len(value), 45))
         sheet.column_dimensions[letter].width = max_len + 2
+
+
+def _add_total_formulas(sheet: Any) -> None:
+    if sheet.max_row < 3 or sheet.max_column < 2:
+        return
+    last_data_row = sheet.max_row
+    total_row = last_data_row + 1
+    sheet.cell(total_row, 1).value = "TOTAL"
+    sheet.cell(total_row, 1).font = Font(name="Calibri", size=11, bold=True, color="000000")
+    for col_idx in range(2, sheet.max_column + 1):
+        numeric_count = 0
+        for row_idx in range(3, sheet.max_row + 1):
+            value = sheet.cell(row_idx, col_idx).value
+            if isinstance(value, (int, float)):
+                numeric_count += 1
+        if numeric_count >= 2:
+            letter = get_column_letter(col_idx)
+            cell = sheet.cell(total_row, col_idx)
+            cell.value = f"=SUM({letter}3:{letter}{last_data_row})"
+            cell.font = Font(name="Calibri", size=11, bold=True, color="000000")
+            cell.alignment = Alignment(horizontal="right", vertical="center")
 
 
 def _split_blocks(content: str) -> list[str]:
