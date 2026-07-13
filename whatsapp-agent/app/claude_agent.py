@@ -110,7 +110,20 @@ class ClaudeAgent:
         prompt = f"""
 You are planning real edits for an Excel file. The user is a stock manager and may speak English, Swahili, or mixed casual WhatsApp language.
 
-Understand the user's intention from normal language. Do not require commands.
+Analyze the workbook preview carefully and understand the user's intention from normal language. Do not require commands.
+
+IMPORTANT RULES:
+1. If the user asks to "put titles", "add heading", "add title", "weka title", "weka kichwa" or similar title-only requests — set actions to an EMPTY list [] and provide a good title. Do NOT add data-mutating actions unless the user explicitly asks for them. The system will apply light formatting that preserves your original cell styles.
+
+2. If the user's instruction is vague (e.g. "edit this", "fix it", "clean it up", "deliver it as i sent"), YOU must analyze the workbook preview and automatically suggest smart edits. Look at the column names and data to decide what makes sense:
+- If there are columns like "simu", "phone", "mobile", "namba", "contact" — suggest deleting them (stock managers rarely need phone columns in reports).
+- If there are empty or useless columns — suggest keeping only the useful ones.
+- If there is a product/item/description column — suggest adding a product summary.
+- If there is a sortable column like "quantity", "qty", "total", "price" — suggest sorting by it.
+- Always suggest cleaning: delete empty rows, add heading, add filters, freeze panes.
+- If the data looks like stock/inventory data, sort by product name or quantity descending.
+
+DO NOT return can_execute false for vague instructions. Instead, analyze the file and propose sensible edits. The user trusts you to figure it out.
 
 Return ONLY valid JSON, no markdown, no explanation.
 
@@ -121,10 +134,8 @@ Supported actions:
 - sort_by: {{"type":"sort_by","column":"column name","direction":"asc or desc"}}
 - add_product_summary: {{"type":"add_product_summary"}}
 
-If the user only asks to clean/format/arrange/make it neat, return can_execute true with an empty actions list.
-If the user asks for a product/item summary, product totals, summary chini, or summary below, include add_product_summary.
-If the user asks for an edit but it is unclear which column/operation, return can_execute false and one short Swahili/English question.
 Use exact column names from the preview when possible. Never invent columns that are not in the workbook preview.
+Combine multiple actions when it makes sense (e.g. delete useless columns + sort + add summary).
 
 JSON shape:
 {{
@@ -132,7 +143,7 @@ JSON shape:
   "question": "",
   "title": "short workbook title if useful, else empty",
   "actions": [],
-  "summary": "short human summary"
+  "summary": "short human summary of what you will do"
 }}
 
 User message: {user_text or "Help with this Excel file"}
@@ -162,10 +173,10 @@ Workbook preview:
                     "summary": "Apply requested Excel edits",
                 }
             return {
-                "can_execute": False,
-                "question": "Sijaelewa vizuri nifanye edit gani kwenye Excel. Niambie nibadilishe nini?",
+                "can_execute": True,
+                "question": "",
                 "actions": [],
-                "summary": "",
+                "summary": "Clean and format the Excel file",
             }
         if plan.get("can_execute") is False and deterministic_actions:
             plan["can_execute"] = True

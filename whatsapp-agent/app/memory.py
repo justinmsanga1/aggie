@@ -84,6 +84,36 @@ class ConversationMemory:
             _ensure_column(conn, "pending_files", "blob_path", "TEXT")
             _ensure_column(conn, "document_jobs", "source_blob_path", "TEXT")
             _ensure_column(conn, "document_jobs", "result_blob_path", "TEXT")
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS processed_messages (
+                    message_id TEXT PRIMARY KEY,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+
+    def is_message_processed(self, message_id: str) -> bool:
+        if _get_persistent(f"processed_msg:{message_id}"):
+            return True
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM processed_messages WHERE message_id = ?",
+                (message_id,),
+            ).fetchone()
+        return row is not None
+
+    def mark_message_processed(self, message_id: str) -> None:
+        _set_persistent(
+            f"processed_msg:{message_id}",
+            {"message_id": message_id},
+            ttl_seconds=604800,
+        )
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO processed_messages (message_id) VALUES (?)",
+                (message_id,),
+            )
 
     def add_message(self, wa_id: str, role: str, content: str) -> None:
         content = content.strip()

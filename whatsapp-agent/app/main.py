@@ -91,10 +91,16 @@ async def verify_webhook(
 async def receive_webhook(request: Request) -> dict[str, str]:
     payload = await request.json()
     for message in _iter_messages(payload):
+        message_id = message.get("id", "")
+        if message_id and memory.is_message_processed(message_id):
+            logger.info("Skipping duplicate message %s", message_id)
+            continue
         try:
             await _handle_message(message)
         except Exception:
             logger.exception("Failed to handle WhatsApp message")
+        if message_id:
+            memory.mark_message_processed(message_id)
     return {"status": "received"}
 
 
@@ -177,6 +183,7 @@ async def _handle_message(message: dict[str, Any]) -> None:
         elif pending_file:
             try:
                 attachments.append(await _reload_pending_attachment(pending_file))
+                memory.add_message(wa_id, "user", text)
             except Exception:
                 logger.exception("Failed to reload pending WhatsApp file")
                 memory.clear_pending_file(wa_id)
@@ -186,11 +193,7 @@ async def _handle_message(message: dict[str, Any]) -> None:
                 )
                 return
         else:
-            await whatsapp.send_text(
-                wa_id,
-                "Sijaipata ile Excel kwenye server hii. Nitume Excel tena ukiweka instruction kwenye caption ya file, nitairudisha ikiwa edited.",
-            )
-            return
+            logger.info("No pending file for %s, falling through to chat", wa_id)
 
     if len(attachments) >= 2 and _wants_comparison(text):
         comparison_text = await agent.answer(
@@ -688,6 +691,13 @@ def _looks_like_file_action(text: str) -> bool:
             "total",
             "jumla",
             "chini",
+            "edit",
+            "fix",
+            "change",
+            "modify",
+            "update",
+            "tengeneza",
+            "hariri",
         ]
     )
 

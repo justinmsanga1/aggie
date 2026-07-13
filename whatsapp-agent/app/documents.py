@@ -65,12 +65,12 @@ def build_image_content_block(path: Path, mime_type: str) -> dict[str, Any]:
 
 
 def clean_excel_workbook(source: Path, output_dir: Path, instruction_text: str = "") -> Path:
-    """Create a lightly cleaned Excel copy without changing the source file."""
+    """Create a lightly cleaned Excel copy without the source file."""
     source = prepare_excel_source(source, output_dir)
     workbook = load_workbook(str(source))
     heading = _extract_heading(instruction_text, source)
     for sheet in workbook.worksheets:
-        _clean_sheet(sheet, heading)
+        _clean_sheet(sheet, heading, light=True)
 
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     output_name = f"{source.stem}-cleaned-{timestamp}.xlsx"
@@ -132,8 +132,15 @@ def edit_excel_workbook(
     heading = _extract_heading(instruction_text, source)
     if plan and str(plan.get("title") or "").strip():
         heading = _clean_heading(str(plan["title"]))
+
+    has_data_actions = any(
+        str(action.get("type", "")).lower().strip()
+        in {"delete_columns", "keep_columns", "rename_columns", "sort_by", "add_product_summary"}
+        for action in actions
+    )
+
     for sheet in workbook.worksheets:
-        _clean_sheet(sheet, heading)
+        _clean_sheet(sheet, heading, light=not has_data_actions)
 
     for sheet in workbook.worksheets:
         header_row = _find_header_row(sheet)
@@ -457,31 +464,45 @@ def _is_excel_attachment(attachment: dict[str, Any]) -> bool:
     )
 
 
-def _clean_sheet(sheet: Any, heading: str) -> None:
+def _clean_sheet(sheet: Any, heading: str, light: bool = False) -> None:
     _delete_empty_rows(sheet)
     _delete_empty_columns(sheet)
     _add_heading(sheet, heading)
     sheet.freeze_panes = "A3"
 
-    for row in sheet.iter_rows():
-        for cell in row:
-            cell.fill = PatternFill(fill_type=None)
-            cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
-            cell.font = Font(
-                name=cell.font.name or "Calibri",
-                size=cell.font.sz or 11,
-                bold=cell.row in {1, 2},
-                italic=cell.font.italic,
-                color="000000",
-            )
+    if not light:
+        for row in sheet.iter_rows():
+            for cell in row:
+                cell.fill = PatternFill(fill_type=None)
+                cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+                cell.font = Font(
+                    name=cell.font.name or "Calibri",
+                    size=cell.font.sz or 11,
+                    bold=cell.row in {1, 2},
+                    italic=cell.font.italic,
+                    color="000000",
+                )
+    else:
+        for row in sheet.iter_rows(min_row=1, max_row=min(2, sheet.max_row)):
+            for cell in row:
+                if cell.row == 1:
+                    continue
+                cell.font = Font(
+                    name=cell.font.name or "Calibri",
+                    size=cell.font.sz or 11,
+                    bold=True,
+                    color="000000",
+                )
+                cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
     _auto_size_columns(sheet)
 
     if sheet.max_row >= 2:
-        for cell in sheet[2]:
-            cell.font = copy(cell.font)
-            cell.font = Font(name=cell.font.name or "Calibri", size=11, bold=True, color="000000")
-            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        if not light:
+            for cell in sheet[2]:
+                cell.font = copy(cell.font)
+                cell.font = Font(name=cell.font.name or "Calibri", size=11, bold=True, color="000000")
+                cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
         sheet.auto_filter.ref = f"A2:{get_column_letter(sheet.max_column)}{sheet.max_row}"
         _add_total_formulas(sheet)
 
@@ -998,6 +1019,34 @@ def _add_heading(sheet: Any, heading: str) -> None:
     cell.font = Font(name="Calibri", size=15, bold=True, color="000000")
     cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
     sheet.row_dimensions[1].height = 24
+
+
+def _add_heading_only(sheet: Any, heading: str) -> None:
+    """Add a heading row and basic header formatting without resetting existing cell styles."""
+    if sheet.max_row == 0 or sheet.max_column == 0:
+        return
+    first_row_values = [sheet.cell(1, col_idx).value for col_idx in range(1, sheet.max_column + 1)]
+    already_has_heading = (
+        len([value for value in first_row_values if value not in (None, "")]) == 1
+        and sheet.max_column > 1
+    )
+    if not already_has_heading:
+        sheet.insert_rows(1)
+
+    end_column = max(sheet.max_column, 1)
+    if end_column > 1:
+        sheet.merge_cells(start_row=1, start_column=1, end_row=1, end_column=end_column)
+    cell = sheet.cell(1, 1)
+    cell.value = heading
+    cell.font = Font(name="Calibri", size=15, bold=True, color="000000")
+    cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    sheet.row_dimensions[1].height = 24
+
+    if sheet.max_row >= 2:
+        for cell in sheet[2]:
+            cell.font = Font(name="Calibri", size=11, bold=True, color="000000")
+            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        sheet.auto_filter.ref = f"A2:{get_column_letter(sheet.max_column)}{sheet.max_row}"
 
 
 def _delete_empty_rows(sheet: Any) -> None:
