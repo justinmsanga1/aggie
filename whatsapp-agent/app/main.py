@@ -298,7 +298,7 @@ async def _handle_message(message: dict[str, Any]) -> None:
         return
 
     reply = await agent.answer(wa_id=wa_id, user_text=text, attachments=attachments)
-    await whatsapp.send_text(wa_id, reply)
+    await _send_reply_messages(wa_id, reply)
 
 
 def _iter_messages(payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -496,3 +496,12 @@ def _report_title(text: str) -> str:
     if "weekly" in lowered or "wiki" in lowered:
         return "Weekly Report"
     return "Aggie Report"
+
+
+async def _send_reply_messages(wa_id: str, reply: str) -> None:
+    parts = [part.strip() for part in reply.split("[NEXT_MESSAGE]", 1) if part.strip()]
+    if not parts:
+        await whatsapp.send_text(wa_id, "Nimekupata.")
+        return
+    for part in parts[:2]:
+        await whatsapp.send_text(wa_id, part)
