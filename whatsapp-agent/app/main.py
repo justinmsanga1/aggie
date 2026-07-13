@@ -6,6 +6,7 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
 
 from app.claude_agent import ClaudeAgent
+from app import blob_store
 from app.config import get_settings
 from app.documents import (
     DOCX_MIME_TYPE,
@@ -64,6 +65,7 @@ async def debug_config() -> dict[str, bool | str]:
         "persistent_pending_file_store_set": bool(
             (settings.kv_rest_api_url and settings.kv_rest_api_token)
             or (settings.upstash_redis_rest_url and settings.upstash_redis_rest_token)
+            or settings.blob_read_write_token
         ),
         "blob_store_set": bool(settings.blob_read_write_token),
     }
@@ -111,11 +113,13 @@ async def _handle_message(message: dict[str, Any]) -> None:
         if message_type == "document":
             text = text or media.get("caption", "")
         attachments.append(await whatsapp.download_media(media["id"], filename))
+        source_blob_path = _store_attachment_blob(wa_id, attachments[-1])
         memory.set_pending_file(
             wa_id,
             media["id"],
             filename or attachments[-1].get("filename"),
             attachments[-1].get("mime_type"),
+            source_blob_path,
         )
         if message_type == "document":
             memory.create_document_job(
@@ -124,6 +128,7 @@ async def _handle_message(message: dict[str, Any]) -> None:
                 filename or attachments[-1].get("filename"),
                 attachments[-1].get("mime_type"),
                 instruction=text,
+                source_blob_path=source_blob_path,
             )
 
     if message_type not in {"text", "image", "document"}:
@@ -141,12 +146,8 @@ async def _handle_message(message: dict[str, Any]) -> None:
         pending_file = memory.get_pending_file(wa_id)
         if pending_job and pending_job.get("media_id"):
             try:
-                attachments.append(
-                    await whatsapp.download_media(
-                        pending_job["media_id"],
-                        pending_job.get("filename"),
-                    )
-                )
+                attachment = await _reload_pending_attachment(pending_job)
+                attachments.append(attachment)
                 if pending_job.get("filename"):
                     attachments[-1]["filename"] = pending_job["filename"]
                 if pending_job.get("mime_type"):
@@ -175,12 +176,7 @@ async def _handle_message(message: dict[str, Any]) -> None:
                 return
         elif pending_file:
             try:
-                attachments.append(
-                    await whatsapp.download_media(
-                        pending_file["media_id"],
-                        pending_file.get("filename"),
-                    )
-                )
+                attachments.append(await _reload_pending_attachment(pending_file))
             except Exception:
                 logger.exception("Failed to reload pending WhatsApp file")
                 memory.clear_pending_file(wa_id)
@@ -467,6 +463,9 @@ async def _handle_excel_attachment(
             return True
 
         cleaned_file = edit_result.path
+        result_blob_path = ""
+        if job:
+            result_blob_path = _store_output_blob(wa_id, job["job_id"], cleaned_file, XLSX_MIME_TYPE)
         applied_text = "; ".join(edit_result.applied)
         summary = str(plan.get("summary") or "").strip()
         caption = (
@@ -488,6 +487,7 @@ async def _handle_excel_attachment(
                 event="sent",
                 detail=cleaned_file.name,
                 result_filename=cleaned_file.name,
+                result_blob_path=result_blob_path,
             )
     except Exception:
         logger.exception("Excel edit failed for %s", wa_id)
@@ -515,6 +515,44 @@ async def _handle_excel_attachment(
     memory.clear_pending_file(wa_id)
     memory.clear_pending_instruction(wa_id)
     return True
+
+
+async def _reload_pending_attachment(record: dict[str, Any]) -> dict[str, Any]:
+    filename = str(record.get("filename") or "attachment.xlsx")
+    mime_type = str(record.get("mime_type") or "application/octet-stream")
+    blob_path = str(record.get("source_blob_path") or record.get("blob_path") or "")
+    if blob_path:
+        target = settings.upload_dir / blob_store.safe_blob_name(filename)
+        if blob_store.get_to_file(blob_path, target):
+            return {
+                "path": str(target),
+                "filename": target.name,
+                "mime_type": mime_type,
+                "media_id": record.get("media_id", ""),
+                "blob_path": blob_path,
+            }
+
+    return await whatsapp.download_media(str(record["media_id"]), filename)
+
+
+def _store_attachment_blob(wa_id: str, attachment: dict[str, Any]) -> str:
+    if not blob_store.is_configured():
+        return ""
+    path = Path(attachment["path"])
+    filename = blob_store.safe_blob_name(str(attachment.get("filename") or path.name))
+    media_id = blob_store.safe_blob_name(str(attachment.get("media_id") or "media"))
+    pathname = f"uploads/{blob_store.safe_blob_name(wa_id)}/{media_id}-{filename}"
+    return blob_store.put_file(path, pathname, str(attachment.get("mime_type") or "application/octet-stream")) or ""
+
+
+def _store_output_blob(wa_id: str, job_id: str, path: Path, mime_type: str) -> str:
+    if not blob_store.is_configured():
+        return ""
+    pathname = (
+        f"outputs/{blob_store.safe_blob_name(wa_id)}/"
+        f"{blob_store.safe_blob_name(job_id)}/{blob_store.safe_blob_name(path.name)}"
+    )
+    return blob_store.put_file(path, pathname, mime_type) or ""
 
 
 def _job_for_attachment(wa_id: str, attachment: dict[str, Any]) -> dict[str, Any] | None:

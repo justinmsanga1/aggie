@@ -7,6 +7,8 @@ from typing import Any
 
 import httpx
 
+from app import blob_store
+
 
 class ConversationMemory:
     def __init__(self, database_path: Path):
@@ -45,6 +47,7 @@ class ConversationMemory:
                     media_id TEXT NOT NULL,
                     filename TEXT,
                     mime_type TEXT,
+                    blob_path TEXT,
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
                 )
                 """
@@ -67,6 +70,8 @@ class ConversationMemory:
                     media_id TEXT,
                     filename TEXT,
                     mime_type TEXT,
+                    source_blob_path TEXT,
+                    result_blob_path TEXT,
                     instruction TEXT,
                     result_filename TEXT,
                     error TEXT,
@@ -76,6 +81,9 @@ class ConversationMemory:
                 )
                 """
             )
+            _ensure_column(conn, "pending_files", "blob_path", "TEXT")
+            _ensure_column(conn, "document_jobs", "source_blob_path", "TEXT")
+            _ensure_column(conn, "document_jobs", "result_blob_path", "TEXT")
 
     def add_message(self, wa_id: str, role: str, content: str) -> None:
         content = content.strip()
@@ -141,57 +149,63 @@ class ConversationMemory:
         media_id: str,
         filename: str | None,
         mime_type: str | None,
+        blob_path: str | None = None,
     ) -> None:
         payload = {
             "media_id": media_id,
             "filename": filename or "",
             "mime_type": mime_type or "",
+            "blob_path": blob_path or "",
         }
-        if _redis_set(f"pending_file:{wa_id}", payload):
+        if _set_persistent(f"pending_file:{wa_id}", payload):
             return
 
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO pending_files (wa_id, media_id, filename, mime_type, created_at)
-                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                INSERT INTO pending_files (wa_id, media_id, filename, mime_type, blob_path, created_at)
+                VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 ON CONFLICT(wa_id) DO UPDATE SET
                     media_id = excluded.media_id,
                     filename = excluded.filename,
                     mime_type = excluded.mime_type,
+                    blob_path = excluded.blob_path,
                     created_at = CURRENT_TIMESTAMP
                 """,
-                (wa_id, media_id, filename or "", mime_type or ""),
+                (wa_id, media_id, filename or "", mime_type or "", blob_path or ""),
             )
 
     def get_pending_file(self, wa_id: str) -> dict[str, Any] | None:
-        redis_value = _redis_get(f"pending_file:{wa_id}")
-        if redis_value:
+        value = _get_persistent(f"pending_file:{wa_id}")
+        if value:
             return {
-                "media_id": redis_value.get("media_id"),
-                "filename": redis_value.get("filename") or None,
-                "mime_type": redis_value.get("mime_type") or None,
+                "media_id": value.get("media_id"),
+                "filename": value.get("filename") or None,
+                "mime_type": value.get("mime_type") or None,
+                "blob_path": value.get("blob_path") or None,
             }
 
         with self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT media_id, filename, mime_type FROM pending_files
+                SELECT media_id, filename, mime_type, blob_path FROM pending_files
                 WHERE wa_id = ?
                 """,
                 (wa_id,),
             ).fetchone()
         if not row:
             return None
-        media_id, filename, mime_type = row
+        media_id, filename, mime_type, blob_path = row
         return {
             "media_id": media_id,
             "filename": filename or None,
             "mime_type": mime_type or None,
+            "blob_path": blob_path or None,
         }
 
     def clear_pending_file(self, wa_id: str) -> None:
         _redis_delete(f"pending_file:{wa_id}")
+        blob_store.delete(_blob_key(f"pending_file:{wa_id}"))
         with self._connect() as conn:
             conn.execute("DELETE FROM pending_files WHERE wa_id = ?", (wa_id,))
 
@@ -200,7 +214,7 @@ class ConversationMemory:
         if not instruction:
             return
         payload = {"instruction": instruction}
-        if _redis_set(f"pending_instruction:{wa_id}", payload):
+        if _set_persistent(f"pending_instruction:{wa_id}", payload):
             return
         with self._connect() as conn:
             conn.execute(
@@ -215,9 +229,9 @@ class ConversationMemory:
             )
 
     def get_pending_instruction(self, wa_id: str) -> str:
-        redis_value = _redis_get(f"pending_instruction:{wa_id}")
-        if redis_value:
-            return str(redis_value.get("instruction") or "")
+        value = _get_persistent(f"pending_instruction:{wa_id}")
+        if value:
+            return str(value.get("instruction") or "")
         with self._connect() as conn:
             row = conn.execute(
                 """
@@ -230,6 +244,7 @@ class ConversationMemory:
 
     def clear_pending_instruction(self, wa_id: str) -> None:
         _redis_delete(f"pending_instruction:{wa_id}")
+        blob_store.delete(_blob_key(f"pending_instruction:{wa_id}"))
         with self._connect() as conn:
             conn.execute("DELETE FROM pending_instructions WHERE wa_id = ?", (wa_id,))
 
@@ -240,6 +255,7 @@ class ConversationMemory:
         filename: str | None,
         mime_type: str | None,
         instruction: str = "",
+        source_blob_path: str | None = None,
     ) -> dict[str, Any]:
         job = {
             "job_id": uuid.uuid4().hex,
@@ -248,6 +264,8 @@ class ConversationMemory:
             "media_id": media_id,
             "filename": filename or "",
             "mime_type": mime_type or "",
+            "source_blob_path": source_blob_path or "",
+            "result_blob_path": "",
             "instruction": instruction.strip(),
             "result_filename": "",
             "error": "",
@@ -255,11 +273,11 @@ class ConversationMemory:
         }
         job["events"].append(_job_event("received", "File received"))
         self._save_document_job(job)
-        _redis_set(f"latest_document_job:{wa_id}", {"job_id": job["job_id"]})
+        _set_persistent(f"latest_document_job:{wa_id}", {"job_id": job["job_id"]})
         return job
 
     def latest_document_job(self, wa_id: str) -> dict[str, Any] | None:
-        latest = _redis_get(f"latest_document_job:{wa_id}")
+        latest = _get_persistent(f"latest_document_job:{wa_id}")
         if latest and latest.get("job_id"):
             job = self.get_document_job(str(latest["job_id"]))
             if job:
@@ -277,14 +295,14 @@ class ConversationMemory:
         return self.get_document_job(row[0]) if row else None
 
     def get_document_job(self, job_id: str) -> dict[str, Any] | None:
-        redis_job = _redis_get(f"document_job:{job_id}")
-        if redis_job:
-            return redis_job
+        persistent_job = _get_persistent(f"document_job:{job_id}")
+        if persistent_job:
+            return persistent_job
         with self._connect() as conn:
             row = conn.execute(
                 """
                 SELECT job_id, wa_id, status, media_id, filename, mime_type, instruction,
-                       result_filename, error, events_json
+                       result_filename, error, events_json, source_blob_path, result_blob_path
                 FROM document_jobs
                 WHERE job_id = ?
                 """,
@@ -303,6 +321,8 @@ class ConversationMemory:
             result_filename,
             error,
             events_json,
+            source_blob_path,
+            result_blob_path,
         ) = row
         return {
             "job_id": job_id,
@@ -311,6 +331,8 @@ class ConversationMemory:
             "media_id": media_id or "",
             "filename": filename or "",
             "mime_type": mime_type or "",
+            "source_blob_path": source_blob_path or "",
+            "result_blob_path": result_blob_path or "",
             "instruction": instruction or "",
             "result_filename": result_filename or "",
             "error": error or "",
@@ -362,21 +384,23 @@ class ConversationMemory:
     def _save_document_job(self, job: dict[str, Any]) -> None:
         events = job.get("events") if isinstance(job.get("events"), list) else []
         job["events"] = events
-        _redis_set(f"document_job:{job['job_id']}", job, ttl_seconds=604800)
+        _set_persistent(f"document_job:{job['job_id']}", job, ttl_seconds=604800)
         with self._connect() as conn:
             conn.execute(
                 """
                 INSERT INTO document_jobs (
                     job_id, wa_id, status, media_id, filename, mime_type, instruction,
-                    result_filename, error, events_json, updated_at
+                    source_blob_path, result_blob_path, result_filename, error, events_json, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 ON CONFLICT(job_id) DO UPDATE SET
                     status = excluded.status,
                     media_id = excluded.media_id,
                     filename = excluded.filename,
                     mime_type = excluded.mime_type,
                     instruction = excluded.instruction,
+                    source_blob_path = excluded.source_blob_path,
+                    result_blob_path = excluded.result_blob_path,
                     result_filename = excluded.result_filename,
                     error = excluded.error,
                     events_json = excluded.events_json,
@@ -390,6 +414,8 @@ class ConversationMemory:
                     job.get("filename", ""),
                     job.get("mime_type", ""),
                     job.get("instruction", ""),
+                    job.get("source_blob_path", ""),
+                    job.get("result_blob_path", ""),
                     job.get("result_filename", ""),
                     job.get("error", ""),
                     json.dumps(events),
@@ -429,6 +455,26 @@ def _redis_set(key: str, value: dict[str, Any], ttl_seconds: int = 86400) -> boo
         return True
     except Exception:
         return False
+
+
+def _set_persistent(key: str, value: dict[str, Any], ttl_seconds: int = 86400) -> bool:
+    if _redis_set(key, value, ttl_seconds=ttl_seconds):
+        return True
+    if blob_store.put_json(_blob_key(key), value):
+        return True
+    return False
+
+
+def _get_persistent(key: str) -> dict[str, Any] | None:
+    value = _redis_get(key)
+    if value:
+        return value
+    return blob_store.get_json(_blob_key(key))
+
+
+def _blob_key(key: str) -> str:
+    safe = key.replace(":", "/")
+    return f"state/{safe}.json"
 
 
 def _redis_get(key: str) -> dict[str, Any] | None:
@@ -485,3 +531,9 @@ def _loads_events(raw: str) -> list[dict[str, Any]]:
         return value if isinstance(value, list) else []
     except json.JSONDecodeError:
         return []
+
+
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, declaration: str) -> None:
+    existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    if column not in existing:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
