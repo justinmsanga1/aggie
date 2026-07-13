@@ -503,14 +503,17 @@ def _sort_sheet_by_column(sheet: Any, header_row: int, column: str, direction: s
 
 def _add_product_summary(sheet: Any, header_row: int) -> bool:
     product_col = _find_product_column(sheet, header_row)
+    if not product_col and header_row == 1 and sheet.max_row >= 2:
+        header_row = 2
+        product_col = _find_product_column(sheet, header_row)
     if not product_col:
         return False
 
     numeric_cols = _find_numeric_columns(sheet, header_row, exclude={product_col})
-    if not numeric_cols:
-        return False
+    count_only = not numeric_cols
 
     summary: dict[str, dict[int, float]] = {}
+    counts: dict[str, int] = {}
     for row_idx in range(header_row + 1, sheet.max_row + 1):
         product = sheet.cell(row_idx, product_col).value
         if product in (None, ""):
@@ -518,17 +521,20 @@ def _add_product_summary(sheet: Any, header_row: int) -> bool:
         product_name = str(product).strip()
         if not product_name or product_name.upper() == "TOTAL":
             continue
+        counts[product_name] = counts.get(product_name, 0) + 1
+        if count_only:
+            continue
         bucket = summary.setdefault(product_name, {col_idx: 0 for col_idx in numeric_cols})
         for col_idx in numeric_cols:
             number = _to_number(sheet.cell(row_idx, col_idx).value)
             if number is not None:
                 bucket[col_idx] += number
 
-    if not summary:
+    if not summary and not counts:
         return False
 
     start_row = sheet.max_row + 2
-    end_col = 1 + len(numeric_cols)
+    end_col = 2 if count_only else 1 + len(numeric_cols)
     sheet.cell(start_row, 1).value = "PRODUCT SUMMARY"
     sheet.cell(start_row, 1).font = Font(name="Calibri", size=13, bold=True, color="000000")
     if end_col > 1:
@@ -538,15 +544,24 @@ def _add_product_summary(sheet: Any, header_row: int) -> bool:
     product_header = sheet.cell(header_row, product_col).value or "Product"
     sheet.cell(header_output_row, 1).value = product_header
     sheet.cell(header_output_row, 1).font = Font(name="Calibri", size=11, bold=True, color="000000")
-    for output_idx, col_idx in enumerate(numeric_cols, start=2):
-        sheet.cell(header_output_row, output_idx).value = sheet.cell(header_row, col_idx).value
-        sheet.cell(header_output_row, output_idx).font = Font(name="Calibri", size=11, bold=True, color="000000")
+    if count_only:
+        sheet.cell(header_output_row, 2).value = "Count"
+        sheet.cell(header_output_row, 2).font = Font(name="Calibri", size=11, bold=True, color="000000")
+    else:
+        for output_idx, col_idx in enumerate(numeric_cols, start=2):
+            sheet.cell(header_output_row, output_idx).value = sheet.cell(header_row, col_idx).value
+            sheet.cell(header_output_row, output_idx).font = Font(name="Calibri", size=11, bold=True, color="000000")
 
     row_idx = header_output_row + 1
-    for product_name, totals in sorted(summary.items(), key=lambda item: item[0].lower()):
+    product_names = sorted(counts, key=str.lower)
+    for product_name in product_names:
         sheet.cell(row_idx, 1).value = product_name
-        for output_idx, col_idx in enumerate(numeric_cols, start=2):
-            sheet.cell(row_idx, output_idx).value = totals[col_idx]
+        if count_only:
+            sheet.cell(row_idx, 2).value = counts[product_name]
+        else:
+            totals = summary.get(product_name, {})
+            for output_idx, col_idx in enumerate(numeric_cols, start=2):
+                sheet.cell(row_idx, output_idx).value = totals.get(col_idx, 0)
         row_idx += 1
 
     total_row = row_idx
@@ -619,6 +634,10 @@ def _match_column(sheet: Any, header_row: int, request: str) -> int | None:
     if not cleaned_request:
         return None
 
+    semantic_col = _semantic_column_match(sheet, header_row, cleaned_request)
+    if semantic_col:
+        return semantic_col
+
     if re.fullmatch(r"[a-zA-Z]{1,3}", request.strip()):
         col_idx = _column_letter_to_index(request.strip())
         if col_idx and col_idx <= sheet.max_column:
@@ -645,6 +664,61 @@ def _match_column(sheet: Any, header_row: int, request: str) -> int | None:
         if score and (best is None or score > best[0]):
             best = (score, col_idx)
     return best[1] if best else None
+
+
+def _semantic_column_match(sheet: Any, header_row: int, request: str) -> int | None:
+    words = set(request.split())
+    if words & {"simu", "phone", "mobile", "number", "namba", "contact", "contacts"}:
+        return _find_phone_like_column(sheet, header_row)
+    if words & {"quantity", "quantiti", "qty", "qnty", "idadi", "idad", "pcs", "piece", "pieces"}:
+        return _find_quantity_like_column(sheet, header_row)
+    return None
+
+
+def _find_phone_like_column(sheet: Any, header_row: int) -> int | None:
+    best: tuple[int, int] | None = None
+    for col_idx in range(1, sheet.max_column + 1):
+        hits = 0
+        for row_idx in range(header_row + 1, min(sheet.max_row, header_row + 80) + 1):
+            value = sheet.cell(row_idx, col_idx).value
+            if _looks_like_phone_value(value):
+                hits += 1
+        if hits and (best is None or hits > best[0]):
+            best = (hits, col_idx)
+    return best[1] if best and best[0] >= 1 else None
+
+
+def _find_quantity_like_column(sheet: Any, header_row: int) -> int | None:
+    for name in ["qty", "quantity", "qnty", "pcs", "pieces", "idadi"]:
+        for col_idx in range(1, sheet.max_column + 1):
+            header = _normalize_header(str(sheet.cell(header_row, col_idx).value or ""))
+            if name in header:
+                return col_idx
+
+    best: tuple[int, int] | None = None
+    for col_idx in range(1, sheet.max_column + 1):
+        numeric_count = 0
+        integerish_count = 0
+        for row_idx in range(header_row + 1, min(sheet.max_row, header_row + 80) + 1):
+            number = _to_number(sheet.cell(row_idx, col_idx).value)
+            if number is None:
+                continue
+            numeric_count += 1
+            if float(number).is_integer() and 0 <= number <= 100000:
+                integerish_count += 1
+        score = integerish_count * 2 + numeric_count
+        if score and (best is None or score > best[0]):
+            best = (score, col_idx)
+    return best[1] if best and best[0] >= 2 else None
+
+
+def _looks_like_phone_value(value: Any) -> bool:
+    if value in (None, ""):
+        return False
+    text = re.sub(r"\D", "", str(value))
+    if len(text) < 7 or len(text) > 15:
+        return False
+    return text.startswith(("0", "255", "254", "256", "1", "7"))
 
 
 def _normalize_header(value: str) -> str:

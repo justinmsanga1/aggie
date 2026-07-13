@@ -48,6 +48,15 @@ class ConversationMemory:
                 )
                 """
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS pending_instructions (
+                    wa_id TEXT PRIMARY KEY,
+                    instruction TEXT NOT NULL,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
 
     def add_message(self, wa_id: str, role: str, content: str) -> None:
         content = content.strip()
@@ -166,6 +175,44 @@ class ConversationMemory:
         _redis_delete(f"pending_file:{wa_id}")
         with self._connect() as conn:
             conn.execute("DELETE FROM pending_files WHERE wa_id = ?", (wa_id,))
+
+    def set_pending_instruction(self, wa_id: str, instruction: str) -> None:
+        instruction = instruction.strip()
+        if not instruction:
+            return
+        payload = {"instruction": instruction}
+        if _redis_set(f"pending_instruction:{wa_id}", payload):
+            return
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO pending_instructions (wa_id, instruction, created_at)
+                VALUES (?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(wa_id) DO UPDATE SET
+                    instruction = excluded.instruction,
+                    created_at = CURRENT_TIMESTAMP
+                """,
+                (wa_id, instruction[:4000]),
+            )
+
+    def get_pending_instruction(self, wa_id: str) -> str:
+        redis_value = _redis_get(f"pending_instruction:{wa_id}")
+        if redis_value:
+            return str(redis_value.get("instruction") or "")
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT instruction FROM pending_instructions
+                WHERE wa_id = ?
+                """,
+                (wa_id,),
+            ).fetchone()
+        return row[0] if row else ""
+
+    def clear_pending_instruction(self, wa_id: str) -> None:
+        _redis_delete(f"pending_instruction:{wa_id}")
+        with self._connect() as conn:
+            conn.execute("DELETE FROM pending_instructions WHERE wa_id = ?", (wa_id,))
 
 
 def _redis_config() -> tuple[str, str] | None:

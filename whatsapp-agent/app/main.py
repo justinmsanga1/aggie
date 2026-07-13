@@ -121,6 +121,8 @@ async def _handle_message(message: dict[str, Any]) -> None:
         return
 
     if message_type == "text" and not attachments and _looks_like_file_action(text):
+        if not _looks_like_confirmation(text):
+            memory.set_pending_instruction(wa_id, text)
         pending_file = memory.get_pending_file(wa_id)
         if pending_file:
             try:
@@ -414,6 +416,7 @@ async def _handle_excel_attachment(
             "Done, nimetuma file mpya. Nimeweka heading, filter, freeze pane, na columns zisomeke vizuri.",
         )
     memory.clear_pending_file(wa_id)
+    memory.clear_pending_instruction(wa_id)
     return True
 
 
@@ -433,8 +436,11 @@ def _extract_text(message: dict[str, Any]) -> str:
 
 
 def _effective_file_instruction(wa_id: str, text: str) -> str:
-    if text.strip():
+    if text.strip() and not _looks_like_confirmation(text):
         return text.strip()
+    pending_instruction = memory.get_pending_instruction(wa_id).strip()
+    if pending_instruction:
+        return pending_instruction
     previous = memory.last_user_message(wa_id).strip()
     if previous.lower().startswith("attached files:"):
         return ""
@@ -537,6 +543,11 @@ def _looks_like_file_action(text: str) -> bool:
             "chini",
         ]
     )
+
+
+def _looks_like_confirmation(text: str) -> bool:
+    lowered = text.strip().lower()
+    return lowered in {"yes", "yeah", "yap", "yep", "ok", "okay", "sawa", "ndio", "ndiyo", "poa"}
 
 
 def _wants_pdf(text: str) -> bool:
