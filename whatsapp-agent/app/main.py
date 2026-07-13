@@ -267,7 +267,15 @@ async def _handle_message(message: dict[str, Any]) -> None:
         excel_attachment = next(
             item for item in attachments if _is_excel_path_or_mime(item)
         )
-        plan = await agent.plan_excel_edits(wa_id, text, excel_attachment)
+        instruction_text = _effective_file_instruction(wa_id, text)
+        if not instruction_text:
+            await whatsapp.send_text(
+                wa_id,
+                "Nimeipokea Excel. Niambie nifanye nini kwenye file hii?",
+            )
+            return
+
+        plan = await agent.plan_excel_edits(wa_id, instruction_text, excel_attachment)
         if plan.get("can_execute") is False:
             await whatsapp.send_text(
                 wa_id,
@@ -278,7 +286,7 @@ async def _handle_message(message: dict[str, Any]) -> None:
         edit_result = edit_excel_workbook(
             Path(excel_attachment["path"]),
             settings.output_dir,
-            instruction_text=text,
+            instruction_text=instruction_text,
             plan=plan,
         )
         requested_actions = plan.get("actions") if isinstance(plan.get("actions"), list) else []
@@ -344,6 +352,15 @@ def _extract_text(message: dict[str, Any]) -> str:
     if message.get("type") == "text":
         return message.get("text", {}).get("body", "").strip()
     return ""
+
+
+def _effective_file_instruction(wa_id: str, text: str) -> str:
+    if text.strip():
+        return text.strip()
+    previous = memory.last_user_message(wa_id).strip()
+    if previous.lower().startswith("attached files:"):
+        return ""
+    return previous
 
 
 def _is_excel_path_or_mime(attachment: dict[str, Any]) -> bool:

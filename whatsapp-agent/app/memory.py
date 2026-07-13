@@ -57,6 +57,19 @@ class ConversationMemory:
 
         return [{"role": role, "content": content} for role, content in reversed(rows)]
 
+    def last_user_message(self, wa_id: str) -> str:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT content FROM messages
+                WHERE wa_id = ? AND role = 'user'
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (wa_id,),
+            ).fetchone()
+        return row[0] if row else ""
+
     def get_preferences(self, wa_id: str) -> str:
         with self._connect() as conn:
             row = conn.execute(

@@ -112,8 +112,10 @@ Supported actions:
 - keep_columns: {{"type":"keep_columns","columns":["columns to keep"]}}
 - rename_columns: {{"type":"rename_columns","columns":{{"old name":"new name"}}}}
 - sort_by: {{"type":"sort_by","column":"column name","direction":"asc or desc"}}
+- add_product_summary: {{"type":"add_product_summary"}}
 
 If the user only asks to clean/format/arrange/make it neat, return can_execute true with an empty actions list.
+If the user asks for a product/item summary, product totals, summary chini, or summary below, include add_product_summary.
 If the user asks for an edit but it is unclear which column/operation, return can_execute false and one short Swahili/English question.
 Use exact column names from the preview when possible. Never invent columns that are not in the workbook preview.
 

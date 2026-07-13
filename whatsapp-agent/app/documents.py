@@ -66,6 +66,15 @@ def clean_excel_workbook(source: Path, output_dir: Path, instruction_text: str =
     for sheet in workbook.worksheets:
         _clean_sheet(sheet, heading)
 
+    for sheet in workbook.worksheets:
+        header_row = _find_header_row(sheet)
+        for action in actions:
+            if str(action.get("type", "")).lower().strip() == "add_product_summary":
+                if _add_product_summary(sheet, header_row):
+                    applied.append(f"{sheet.title}: added product summary")
+                else:
+                    skipped.append(f"{sheet.title}: sikuweza kutengeneza product summary")
+
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     output_name = f"{source.stem}-cleaned-{timestamp}.xlsx"
     target = output_dir / output_name
@@ -131,6 +140,15 @@ def edit_excel_workbook(
         heading = _clean_heading(str(plan["title"]))
     for sheet in workbook.worksheets:
         _clean_sheet(sheet, heading)
+
+    for sheet in workbook.worksheets:
+        header_row = _find_header_row(sheet)
+        for action in actions:
+            if str(action.get("type", "")).lower().strip() == "add_product_summary":
+                if _add_product_summary(sheet, header_row):
+                    applied.append(f"{sheet.title}: added product summary")
+                else:
+                    skipped.append(f"{sheet.title}: sikuweza kutengeneza product summary")
 
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     output_name = f"{source.stem}-edited-{timestamp}.xlsx"
@@ -469,6 +487,113 @@ def _sort_sheet_by_column(sheet: Any, header_row: int, column: str, direction: s
     return str(header or column)
 
 
+def _add_product_summary(sheet: Any, header_row: int) -> bool:
+    product_col = _find_product_column(sheet, header_row)
+    if not product_col:
+        return False
+
+    numeric_cols = _find_numeric_columns(sheet, header_row, exclude={product_col})
+    if not numeric_cols:
+        return False
+
+    summary: dict[str, dict[int, float]] = {}
+    for row_idx in range(header_row + 1, sheet.max_row + 1):
+        product = sheet.cell(row_idx, product_col).value
+        if product in (None, ""):
+            continue
+        product_name = str(product).strip()
+        if not product_name or product_name.upper() == "TOTAL":
+            continue
+        bucket = summary.setdefault(product_name, {col_idx: 0 for col_idx in numeric_cols})
+        for col_idx in numeric_cols:
+            number = _to_number(sheet.cell(row_idx, col_idx).value)
+            if number is not None:
+                bucket[col_idx] += number
+
+    if not summary:
+        return False
+
+    start_row = sheet.max_row + 2
+    end_col = 1 + len(numeric_cols)
+    sheet.cell(start_row, 1).value = "PRODUCT SUMMARY"
+    sheet.cell(start_row, 1).font = Font(name="Calibri", size=13, bold=True, color="000000")
+    if end_col > 1:
+        sheet.merge_cells(start_row=start_row, start_column=1, end_row=start_row, end_column=end_col)
+
+    header_output_row = start_row + 1
+    product_header = sheet.cell(header_row, product_col).value or "Product"
+    sheet.cell(header_output_row, 1).value = product_header
+    sheet.cell(header_output_row, 1).font = Font(name="Calibri", size=11, bold=True, color="000000")
+    for output_idx, col_idx in enumerate(numeric_cols, start=2):
+        sheet.cell(header_output_row, output_idx).value = sheet.cell(header_row, col_idx).value
+        sheet.cell(header_output_row, output_idx).font = Font(name="Calibri", size=11, bold=True, color="000000")
+
+    row_idx = header_output_row + 1
+    for product_name, totals in sorted(summary.items(), key=lambda item: item[0].lower()):
+        sheet.cell(row_idx, 1).value = product_name
+        for output_idx, col_idx in enumerate(numeric_cols, start=2):
+            sheet.cell(row_idx, output_idx).value = totals[col_idx]
+        row_idx += 1
+
+    total_row = row_idx
+    sheet.cell(total_row, 1).value = "TOTAL"
+    sheet.cell(total_row, 1).font = Font(name="Calibri", size=11, bold=True, color="000000")
+    for output_idx in range(2, end_col + 1):
+        letter = get_column_letter(output_idx)
+        cell = sheet.cell(total_row, output_idx)
+        cell.value = f"=SUM({letter}{header_output_row + 1}:{letter}{total_row - 1})"
+        cell.font = Font(name="Calibri", size=11, bold=True, color="000000")
+
+    for row in sheet.iter_rows(min_row=start_row, max_row=total_row, min_col=1, max_col=end_col):
+        for cell in row:
+            cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+    _auto_size_columns(sheet)
+    return True
+
+
+def _find_product_column(sheet: Any, header_row: int) -> int | None:
+    preferred = [
+        "product",
+        "item",
+        "items",
+        "description",
+        "sku",
+        "name",
+        "jina",
+        "bidhaa",
+        "material",
+    ]
+    for name in preferred:
+        col_idx = _match_column(sheet, header_row, name)
+        if col_idx:
+            return col_idx
+    return None
+
+
+def _find_numeric_columns(sheet: Any, header_row: int, exclude: set[int]) -> list[int]:
+    numeric_cols: list[int] = []
+    for col_idx in range(1, sheet.max_column + 1):
+        if col_idx in exclude:
+            continue
+        numeric_count = 0
+        for row_idx in range(header_row + 1, min(sheet.max_row, header_row + 80) + 1):
+            if _to_number(sheet.cell(row_idx, col_idx).value) is not None:
+                numeric_count += 1
+        if numeric_count >= 1:
+            numeric_cols.append(col_idx)
+    return numeric_cols[:8]
+
+
+def _to_number(value: Any) -> float | None:
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        cleaned = value.replace(",", "").strip()
+        if re.fullmatch(r"-?\d+(?:\.\d+)?", cleaned):
+            return float(cleaned)
+    return None
+
+
 def _sort_value(value: Any) -> tuple[int, str]:
     if value in (None, ""):
         return (1, "")
@@ -545,7 +670,7 @@ def _normalize_excel_plan_actions(plan: dict[str, Any] | None) -> list[dict[str,
     if not isinstance(actions, list):
         return []
     normalized: list[dict[str, Any]] = []
-    allowed = {"delete_columns", "keep_columns", "rename_columns", "sort_by"}
+    allowed = {"delete_columns", "keep_columns", "rename_columns", "sort_by", "add_product_summary"}
     for action in actions:
         if isinstance(action, dict) and str(action.get("type", "")).lower().strip() in allowed:
             normalized.append(action)
