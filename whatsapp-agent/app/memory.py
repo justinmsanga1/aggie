@@ -1,6 +1,7 @@
 import sqlite3
 import json
 import os
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -54,6 +55,24 @@ class ConversationMemory:
                     wa_id TEXT PRIMARY KEY,
                     instruction TEXT NOT NULL,
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS document_jobs (
+                    job_id TEXT PRIMARY KEY,
+                    wa_id TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    media_id TEXT,
+                    filename TEXT,
+                    mime_type TEXT,
+                    instruction TEXT,
+                    result_filename TEXT,
+                    error TEXT,
+                    events_json TEXT NOT NULL DEFAULT '[]',
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
                 )
                 """
             )
@@ -214,6 +233,169 @@ class ConversationMemory:
         with self._connect() as conn:
             conn.execute("DELETE FROM pending_instructions WHERE wa_id = ?", (wa_id,))
 
+    def create_document_job(
+        self,
+        wa_id: str,
+        media_id: str,
+        filename: str | None,
+        mime_type: str | None,
+        instruction: str = "",
+    ) -> dict[str, Any]:
+        job = {
+            "job_id": uuid.uuid4().hex,
+            "wa_id": wa_id,
+            "status": "received",
+            "media_id": media_id,
+            "filename": filename or "",
+            "mime_type": mime_type or "",
+            "instruction": instruction.strip(),
+            "result_filename": "",
+            "error": "",
+            "events": [],
+        }
+        job["events"].append(_job_event("received", "File received"))
+        self._save_document_job(job)
+        _redis_set(f"latest_document_job:{wa_id}", {"job_id": job["job_id"]})
+        return job
+
+    def latest_document_job(self, wa_id: str) -> dict[str, Any] | None:
+        latest = _redis_get(f"latest_document_job:{wa_id}")
+        if latest and latest.get("job_id"):
+            job = self.get_document_job(str(latest["job_id"]))
+            if job:
+                return job
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT job_id FROM document_jobs
+                WHERE wa_id = ?
+                ORDER BY updated_at DESC
+                LIMIT 1
+                """,
+                (wa_id,),
+            ).fetchone()
+        return self.get_document_job(row[0]) if row else None
+
+    def get_document_job(self, job_id: str) -> dict[str, Any] | None:
+        redis_job = _redis_get(f"document_job:{job_id}")
+        if redis_job:
+            return redis_job
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT job_id, wa_id, status, media_id, filename, mime_type, instruction,
+                       result_filename, error, events_json
+                FROM document_jobs
+                WHERE job_id = ?
+                """,
+                (job_id,),
+            ).fetchone()
+        if not row:
+            return None
+        (
+            job_id,
+            wa_id,
+            status,
+            media_id,
+            filename,
+            mime_type,
+            instruction,
+            result_filename,
+            error,
+            events_json,
+        ) = row
+        return {
+            "job_id": job_id,
+            "wa_id": wa_id,
+            "status": status,
+            "media_id": media_id or "",
+            "filename": filename or "",
+            "mime_type": mime_type or "",
+            "instruction": instruction or "",
+            "result_filename": result_filename or "",
+            "error": error or "",
+            "events": _loads_events(events_json),
+        }
+
+    def update_document_job(
+        self,
+        job: dict[str, Any],
+        status: str | None = None,
+        event: str | None = None,
+        detail: str = "",
+        **updates: Any,
+    ) -> dict[str, Any]:
+        if status:
+            job["status"] = status
+        for key, value in updates.items():
+            job[key] = value or ""
+        if event:
+            events = job.setdefault("events", [])
+            if isinstance(events, list):
+                events.append(_job_event(event, detail))
+        self._save_document_job(job)
+        return job
+
+    def recent_document_jobs(self, wa_id: str | None = None, limit: int = 10) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            if wa_id:
+                rows = conn.execute(
+                    """
+                    SELECT job_id FROM document_jobs
+                    WHERE wa_id = ?
+                    ORDER BY updated_at DESC
+                    LIMIT ?
+                    """,
+                    (wa_id, limit),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT job_id FROM document_jobs
+                    ORDER BY updated_at DESC
+                    LIMIT ?
+                    """,
+                    (limit,),
+                ).fetchall()
+        return [job for row in rows if (job := self.get_document_job(row[0]))]
+
+    def _save_document_job(self, job: dict[str, Any]) -> None:
+        events = job.get("events") if isinstance(job.get("events"), list) else []
+        job["events"] = events
+        _redis_set(f"document_job:{job['job_id']}", job, ttl_seconds=604800)
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO document_jobs (
+                    job_id, wa_id, status, media_id, filename, mime_type, instruction,
+                    result_filename, error, events_json, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(job_id) DO UPDATE SET
+                    status = excluded.status,
+                    media_id = excluded.media_id,
+                    filename = excluded.filename,
+                    mime_type = excluded.mime_type,
+                    instruction = excluded.instruction,
+                    result_filename = excluded.result_filename,
+                    error = excluded.error,
+                    events_json = excluded.events_json,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    job["job_id"],
+                    job.get("wa_id", ""),
+                    job.get("status", ""),
+                    job.get("media_id", ""),
+                    job.get("filename", ""),
+                    job.get("mime_type", ""),
+                    job.get("instruction", ""),
+                    job.get("result_filename", ""),
+                    job.get("error", ""),
+                    json.dumps(events),
+                ),
+            )
+
 
 def _redis_config() -> tuple[str, str] | None:
     url = (
@@ -285,3 +467,21 @@ def _redis_delete(key: str) -> None:
             )
     except Exception:
         return
+
+
+def _job_event(event: str, detail: str = "") -> dict[str, str]:
+    from datetime import datetime, timezone
+
+    return {
+        "at": datetime.now(timezone.utc).isoformat(),
+        "event": event,
+        "detail": detail,
+    }
+
+
+def _loads_events(raw: str) -> list[dict[str, Any]]:
+    try:
+        value = json.loads(raw or "[]")
+        return value if isinstance(value, list) else []
+    except json.JSONDecodeError:
+        return []

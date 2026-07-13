@@ -68,6 +68,11 @@ async def debug_config() -> dict[str, bool | str]:
     }
 
 
+@app.get("/debug/jobs")
+async def debug_jobs(wa_id: str | None = None, limit: int = 10) -> dict[str, Any]:
+    return {"jobs": memory.recent_document_jobs(wa_id=wa_id, limit=limit)}
+
+
 @app.get("/webhook", response_class=PlainTextResponse)
 async def verify_webhook(
     hub_mode: str = Query(alias="hub.mode"),
@@ -111,6 +116,14 @@ async def _handle_message(message: dict[str, Any]) -> None:
             filename or attachments[-1].get("filename"),
             attachments[-1].get("mime_type"),
         )
+        if message_type == "document":
+            memory.create_document_job(
+                wa_id,
+                media["id"],
+                filename or attachments[-1].get("filename"),
+                attachments[-1].get("mime_type"),
+                instruction=text,
+            )
 
     if message_type not in {"text", "image", "document"}:
         await whatsapp.send_text(
@@ -123,8 +136,43 @@ async def _handle_message(message: dict[str, Any]) -> None:
     if message_type == "text" and not attachments and _looks_like_file_action(text):
         if not _looks_like_confirmation(text):
             memory.set_pending_instruction(wa_id, text)
+        pending_job = memory.latest_document_job(wa_id)
         pending_file = memory.get_pending_file(wa_id)
-        if pending_file:
+        if pending_job and pending_job.get("media_id"):
+            try:
+                attachments.append(
+                    await whatsapp.download_media(
+                        pending_job["media_id"],
+                        pending_job.get("filename"),
+                    )
+                )
+                if pending_job.get("filename"):
+                    attachments[-1]["filename"] = pending_job["filename"]
+                if pending_job.get("mime_type"):
+                    attachments[-1]["mime_type"] = pending_job["mime_type"]
+                if _looks_like_excel_action(text) and not _is_excel_path_or_mime(attachments[-1]):
+                    attachments[-1]["filename"] = _ensure_xlsx_filename(
+                        str(attachments[-1].get("filename") or Path(attachments[-1]["path"]).name)
+                    )
+                    attachments[-1]["mime_type"] = XLSX_MIME_TYPE
+                pending_job = memory.update_document_job(
+                    pending_job,
+                    status="instruction_received",
+                    event="instruction_received",
+                    detail=text,
+                    instruction=text if not _looks_like_confirmation(text) else pending_job.get("instruction", ""),
+                )
+                attachments[-1]["job_id"] = pending_job["job_id"]
+                memory.add_message(wa_id, "user", text)
+            except Exception:
+                logger.exception("Failed to reload pending WhatsApp file")
+                memory.clear_pending_file(wa_id)
+                await whatsapp.send_text(
+                    wa_id,
+                    "File ya mwanzo ime-expire kabla sijai-download tena. Nitume tena hiyo Excel na instruction pamoja.",
+                )
+                return
+        elif pending_file:
             try:
                 attachments.append(
                     await whatsapp.download_media(
@@ -132,16 +180,6 @@ async def _handle_message(message: dict[str, Any]) -> None:
                         pending_file.get("filename"),
                     )
                 )
-                if pending_file.get("filename"):
-                    attachments[-1]["filename"] = pending_file["filename"]
-                if pending_file.get("mime_type"):
-                    attachments[-1]["mime_type"] = pending_file["mime_type"]
-                if _looks_like_excel_action(text) and not _is_excel_path_or_mime(attachments[-1]):
-                    attachments[-1]["filename"] = _ensure_xlsx_filename(
-                        str(attachments[-1].get("filename") or Path(attachments[-1]["path"]).name)
-                    )
-                    attachments[-1]["mime_type"] = XLSX_MIME_TYPE
-                memory.add_message(wa_id, "user", text)
             except Exception:
                 logger.exception("Failed to reload pending WhatsApp file")
                 memory.clear_pending_file(wa_id)
@@ -346,7 +384,10 @@ async def _handle_excel_attachment(
     excel_attachment = next(
         item for item in attachments if _is_excel_path_or_mime(item)
     )
+    job = _job_for_attachment(wa_id, excel_attachment)
     instruction_text = _effective_file_instruction(wa_id, text)
+    if job and job.get("instruction") and not text.strip():
+        instruction_text = str(job["instruction"])
     if not instruction_text:
         await whatsapp.send_text(
             wa_id,
@@ -357,22 +398,67 @@ async def _handle_excel_attachment(
     await whatsapp.send_text(wa_id, "Nimeipata Excel. Naifanyia kazi sasa...")
     logger.info("Excel edit started for %s with file %s", wa_id, excel_attachment.get("filename"))
     try:
+        if job:
+            job = memory.update_document_job(
+                job,
+                status="planning",
+                event="planning",
+                detail=instruction_text,
+                instruction=instruction_text,
+            )
         plan = await agent.plan_excel_edits(wa_id, instruction_text, excel_attachment)
         if plan.get("can_execute") is False:
+            if job:
+                memory.update_document_job(
+                    job,
+                    status="needs_clarification",
+                    event="needs_clarification",
+                    detail=str(plan.get("question") or ""),
+                )
             await whatsapp.send_text(
                 wa_id,
                 str(plan.get("question") or "Sijaelewa vizuri nifanye edit gani kwenye Excel. Niambie nibadilishe nini?"),
             )
             return True
 
+        if job:
+            job = memory.update_document_job(job, status="executing", event="executing", detail=str(plan))
         edit_result = edit_excel_workbook(
             Path(excel_attachment["path"]),
             settings.output_dir,
             instruction_text=instruction_text,
             plan=plan,
         )
+        if job:
+            job = memory.update_document_job(
+                job,
+                status="verifying",
+                event="verified" if edit_result.verified else "verification_failed",
+                detail="; ".join(edit_result.verification_errors or []),
+            )
+        if not edit_result.verified:
+            if job:
+                memory.update_document_job(
+                    job,
+                    status="failed",
+                    event="failed",
+                    detail="; ".join(edit_result.verification_errors or []),
+                    error="; ".join(edit_result.verification_errors or []),
+                )
+            await whatsapp.send_text(
+                wa_id,
+                "Nime-edit file lakini verification haijapita, kwa hiyo sijaituma kama imekamilika. Nitume file tena na instruction kwenye caption moja.",
+            )
+            return True
         requested_actions = plan.get("actions") if isinstance(plan.get("actions"), list) else []
         if requested_actions and not edit_result.applied:
+            if job:
+                memory.update_document_job(
+                    job,
+                    status="needs_clarification",
+                    event="no_actions_applied",
+                    detail=str(plan.get("question") or ""),
+                )
             await whatsapp.send_text(
                 wa_id,
                 str(plan.get("question") or "Nimefungua Excel, lakini sijaweza kuapply hiyo edit. Niambie column au mabadiliko unayotaka exactly."),
@@ -394,8 +480,18 @@ async def _handle_excel_attachment(
             mime_type=XLSX_MIME_TYPE,
         )
         logger.info("Excel edit file sent to %s: %s", wa_id, cleaned_file.name)
+        if job:
+            job = memory.update_document_job(
+                job,
+                status="sent",
+                event="sent",
+                detail=cleaned_file.name,
+                result_filename=cleaned_file.name,
+            )
     except Exception:
         logger.exception("Excel edit failed for %s", wa_id)
+        if job:
+            memory.update_document_job(job, status="failed", event="failed", detail="exception", error="exception")
         await whatsapp.send_text(
             wa_id,
             "Nimejaribu ku-edit Excel lakini imeshindikana kwenye server. Nitume file hiyo hiyo tena pamoja na instruction kwenye caption moja.",
@@ -418,6 +514,18 @@ async def _handle_excel_attachment(
     memory.clear_pending_file(wa_id)
     memory.clear_pending_instruction(wa_id)
     return True
+
+
+def _job_for_attachment(wa_id: str, attachment: dict[str, Any]) -> dict[str, Any] | None:
+    job_id = attachment.get("job_id")
+    if job_id:
+        job = memory.get_document_job(str(job_id))
+        if job:
+            return job
+    latest = memory.latest_document_job(wa_id)
+    if latest and latest.get("media_id") == attachment.get("media_id"):
+        return latest
+    return latest
 
 
 def _iter_messages(payload: dict[str, Any]) -> list[dict[str, Any]]:

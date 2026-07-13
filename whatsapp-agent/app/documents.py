@@ -29,6 +29,8 @@ class ExcelEditResult:
     path: Path
     applied: list[str]
     skipped: list[str]
+    verified: bool = False
+    verification_errors: list[str] | None = None
 
 
 def extract_document_text(path: Path, mime_type: str | None = None) -> str:
@@ -150,7 +152,43 @@ def edit_excel_workbook(
     output_name = f"{source.stem}-edited-{timestamp}.xlsx"
     target = output_dir / output_name
     workbook.save(str(target))
-    return ExcelEditResult(path=target, applied=applied, skipped=skipped)
+    verification_errors = verify_excel_result(target, plan)
+    return ExcelEditResult(
+        path=target,
+        applied=applied,
+        skipped=skipped,
+        verified=not verification_errors,
+        verification_errors=verification_errors,
+    )
+
+
+def verify_excel_result(path: Path, plan: dict[str, Any] | None = None) -> list[str]:
+    actions = _normalize_excel_plan_actions(plan)
+    if not actions:
+        return []
+    errors: list[str] = []
+    workbook = load_workbook(str(path), data_only=True, read_only=True)
+    try:
+        for action in actions:
+            action_type = str(action.get("type", "")).lower().strip()
+            if action_type == "delete_columns":
+                columns = _string_list(action.get("columns"))
+                for sheet in workbook.worksheets:
+                    header_row = _find_header_row(sheet)
+                    headers = _normalized_headers(sheet, header_row)
+                    for column in columns:
+                        requested = _normalize_header(column)
+                        if requested and any(
+                            requested == header or requested in header or header in requested
+                            for header in headers
+                        ):
+                            errors.append(f"{sheet.title}: column bado ipo: {column}")
+            elif action_type == "add_product_summary":
+                if not any(_sheet_contains_value(sheet, "PRODUCT SUMMARY") for sheet in workbook.worksheets):
+                    errors.append("Product summary haikuonekana kwenye output")
+    finally:
+        workbook.close()
+    return errors
 
 
 def prepare_excel_source(source: Path, output_dir: Path) -> Path:
@@ -429,6 +467,22 @@ def _find_header_row(sheet: Any) -> int:
             best_row = row_idx
             best_score = score
     return best_row
+
+
+def _normalized_headers(sheet: Any, header_row: int) -> list[str]:
+    return [
+        _normalize_header(str(sheet.cell(header_row, col_idx).value or ""))
+        for col_idx in range(1, sheet.max_column + 1)
+    ]
+
+
+def _sheet_contains_value(sheet: Any, needle: str) -> bool:
+    target = needle.strip().lower()
+    for row in sheet.iter_rows():
+        for cell in row:
+            if str(cell.value or "").strip().lower() == target:
+                return True
+    return False
 
 
 def _delete_requested_columns(sheet: Any, header_row: int, requested_columns: list[str]) -> list[str]:
