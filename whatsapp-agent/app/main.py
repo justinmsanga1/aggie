@@ -11,13 +11,14 @@ from app.documents import (
     DOCX_MIME_TYPE,
     PDF_MIME_TYPE,
     XLSX_MIME_TYPE,
-    clean_excel_workbook,
     combined_attachment_text,
     create_docx_report,
     create_excel_from_text,
     create_pdf_report,
     clean_docx_document,
+    edit_excel_workbook,
     has_excel_attachment,
+    is_specific_excel_edit_requested,
 )
 from app.memory import ConversationMemory
 from app.whatsapp import WhatsAppClient
@@ -267,26 +268,43 @@ async def _handle_message(message: dict[str, Any]) -> None:
         excel_attachment = next(
             item for item in attachments if _is_excel_path_or_mime(item)
         )
-        cleaned_file = clean_excel_workbook(
+        edit_result = edit_excel_workbook(
             Path(excel_attachment["path"]),
             settings.output_dir,
             instruction_text=text,
         )
+        if is_specific_excel_edit_requested(text) and not edit_result.applied:
+            await whatsapp.send_text(
+                wa_id,
+                "Nimefungua Excel, lakini sijaipata hiyo column. Niambie jina lake exactly kama linavyoonekana kwenye header.",
+            )
+            return
+
+        cleaned_file = edit_result.path
+        applied_text = "; ".join(edit_result.applied)
+        caption = (
+            "Nime-edit Excel file. Unaweza ku-download hii version hapa."
+            if applied_text
+            else "Nimeformat Excel file na kuongeza heading/format safi. Unaweza ku-download hii version hapa."
+        )
         await whatsapp.send_document(
             wa_id,
             cleaned_file,
-            caption="Nime-edit Excel file na kuongeza heading/format safi. Unaweza ku-download hii version hapa.",
+            caption=caption,
             mime_type=XLSX_MIME_TYPE,
         )
         memory.add_message(
             wa_id,
             "assistant",
-            f"Sent cleaned Excel file: {cleaned_file.name}",
+            f"Sent edited Excel file: {cleaned_file.name}. {applied_text}",
         )
-        await whatsapp.send_text(
-            wa_id,
-            "Done, nimetuma file mpya hapo juu. Nimeweka heading, nimepanga header row, filter, freeze pane, na columns zisomeke vizuri.",
-        )
+        if applied_text:
+            await whatsapp.send_text(wa_id, f"Done, nimetuma file mpya. {applied_text}.")
+        else:
+            await whatsapp.send_text(
+                wa_id,
+                "Done, nimetuma file mpya. Nimeweka heading, filter, freeze pane, na columns zisomeke vizuri.",
+            )
         return
 
     if _looks_like_missing_file_followup(text):

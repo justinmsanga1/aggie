@@ -2,6 +2,7 @@ import base64
 import csv
 import re
 from copy import copy
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -20,6 +21,13 @@ IMAGE_MIME_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
 DOCX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 PDF_MIME_TYPE = "application/pdf"
 XLSX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+@dataclass(frozen=True)
+class ExcelEditResult:
+    path: Path
+    applied: list[str]
+    skipped: list[str]
 
 
 def extract_document_text(path: Path, mime_type: str | None = None) -> str:
@@ -63,6 +71,55 @@ def clean_excel_workbook(source: Path, output_dir: Path, instruction_text: str =
     target = output_dir / output_name
     workbook.save(str(target))
     return target
+
+
+def edit_excel_workbook(source: Path, output_dir: Path, instruction_text: str = "") -> ExcelEditResult:
+    """Apply explicit Excel edits, then return a formatted copy."""
+    workbook = load_workbook(str(source))
+    applied: list[str] = []
+    skipped: list[str] = []
+
+    requested_columns = _extract_delete_column_requests(instruction_text)
+    if requested_columns:
+        for sheet in workbook.worksheets:
+            header_row = _find_header_row(sheet)
+            deleted = _delete_requested_columns(sheet, header_row, requested_columns)
+            if deleted:
+                applied.append(
+                    f"{sheet.title}: deleted column(s) {', '.join(deleted)}"
+                )
+            else:
+                skipped.append(
+                    f"{sheet.title}: sikuipata column {', '.join(requested_columns)}"
+                )
+
+    heading = _extract_heading(instruction_text, source)
+    for sheet in workbook.worksheets:
+        _clean_sheet(sheet, heading)
+
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    output_name = f"{source.stem}-edited-{timestamp}.xlsx"
+    target = output_dir / output_name
+    workbook.save(str(target))
+    return ExcelEditResult(path=target, applied=applied, skipped=skipped)
+
+
+def is_specific_excel_edit_requested(text: str) -> bool:
+    lowered = text.lower()
+    return any(
+        word in lowered
+        for word in [
+            "delete",
+            "remove",
+            "drop",
+            "futa",
+            "ondoa",
+            "toa column",
+            "toa safu",
+            "rename",
+            "badilisha jina",
+        ]
+    )
 
 
 def create_docx_report(content: str, output_dir: Path, title: str = "Aggie Report") -> Path:
@@ -229,6 +286,128 @@ def _clean_sheet(sheet: Any, heading: str) -> None:
             cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
         sheet.auto_filter.ref = f"A2:{get_column_letter(sheet.max_column)}{sheet.max_row}"
         _add_total_formulas(sheet)
+
+
+def _extract_delete_column_requests(text: str) -> list[str]:
+    if not text.strip():
+        return []
+    patterns = [
+        r"(?:delete|remove|drop|futa|ondoa)\s+(?:the\s+)?(?:column|columns|col|safu)\s+(?:ya\s+|yenye\s+|called\s+|named\s+)?([^.;,\n]+)",
+        r"(?:delete|remove|drop|futa|ondoa|toa)\s+([^.;,\n]+?)\s+(?:column|columns|col|safu)",
+        r"(?:toa)\s+(?:column|columns|col|safu)\s+(?:ya\s+|yenye\s+)?([^.;,\n]+)",
+    ]
+    values: list[str] = []
+    for pattern in patterns:
+        for match in re.finditer(pattern, text, flags=re.IGNORECASE):
+            raw = match.group(1)
+            raw = re.split(
+                r"\b(?:then|halafu|kisha|please|tafadhali|from|kwenye)\b",
+                raw,
+                flags=re.IGNORECASE,
+            )[0]
+            parts = re.split(r"\s*(?:,|/|\+|&|\band\b|\bna\b)\s*", raw, flags=re.IGNORECASE)
+            for part in parts:
+                cleaned = part.strip(" '\"`:-")
+                if cleaned and cleaned.lower() not in {"the", "column", "columns", "safu"}:
+                    values.append(cleaned)
+    return _unique_preserve_order(values)
+
+
+def _find_header_row(sheet: Any) -> int:
+    best_row = 1
+    best_score = -1
+    max_scan = min(sheet.max_row, 10)
+    for row_idx in range(1, max_scan + 1):
+        values = [
+            sheet.cell(row_idx, col_idx).value
+            for col_idx in range(1, sheet.max_column + 1)
+        ]
+        non_empty = [value for value in values if value not in (None, "")]
+        text_count = sum(1 for value in non_empty if isinstance(value, str))
+        score = len(non_empty) + text_count
+        if score > best_score and len(non_empty) >= 2:
+            best_row = row_idx
+            best_score = score
+    return best_row
+
+
+def _delete_requested_columns(sheet: Any, header_row: int, requested_columns: list[str]) -> list[str]:
+    matches: list[tuple[int, str]] = []
+    for request in requested_columns:
+        col_idx = _match_column(sheet, header_row, request)
+        if col_idx and all(existing_idx != col_idx for existing_idx, _ in matches):
+            header = sheet.cell(header_row, col_idx).value
+            label = str(header).strip() if header not in (None, "") else get_column_letter(col_idx)
+            matches.append((col_idx, label))
+
+    deleted_labels: list[str] = []
+    for col_idx, label in sorted(matches, reverse=True):
+        sheet.delete_cols(col_idx)
+        deleted_labels.append(label)
+    return list(reversed(deleted_labels))
+
+
+def _match_column(sheet: Any, header_row: int, request: str) -> int | None:
+    cleaned_request = _normalize_header(request)
+    if not cleaned_request:
+        return None
+
+    if re.fullmatch(r"[a-zA-Z]{1,3}", request.strip()):
+        col_idx = _column_letter_to_index(request.strip())
+        if col_idx and col_idx <= sheet.max_column:
+            return col_idx
+
+    if request.strip().isdigit():
+        col_idx = int(request.strip())
+        if 1 <= col_idx <= sheet.max_column:
+            return col_idx
+
+    best: tuple[int, int] | None = None
+    for col_idx in range(1, sheet.max_column + 1):
+        value = sheet.cell(header_row, col_idx).value
+        header = _normalize_header("" if value is None else str(value))
+        if not header:
+            continue
+        score = 0
+        if header == cleaned_request:
+            score = 100
+        elif cleaned_request in header or header in cleaned_request:
+            score = 80
+        elif _word_overlap(cleaned_request, header) >= 1:
+            score = 60
+        if score and (best is None or score > best[0]):
+            best = (score, col_idx)
+    return best[1] if best else None
+
+
+def _normalize_header(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
+
+
+def _word_overlap(left: str, right: str) -> int:
+    left_words = {word for word in left.split() if len(word) > 2}
+    right_words = {word for word in right.split() if len(word) > 2}
+    return len(left_words & right_words)
+
+
+def _column_letter_to_index(value: str) -> int | None:
+    result = 0
+    for char in value.upper():
+        if not ("A" <= char <= "Z"):
+            return None
+        result = result * 26 + (ord(char) - ord("A") + 1)
+    return result or None
+
+
+def _unique_preserve_order(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        key = value.lower()
+        if key not in seen:
+            seen.add(key)
+            result.append(value)
+    return result
 
 
 def _extract_heading(instruction_text: str, source: Path) -> str:
