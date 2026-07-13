@@ -73,27 +73,62 @@ def clean_excel_workbook(source: Path, output_dir: Path, instruction_text: str =
     return target
 
 
-def edit_excel_workbook(source: Path, output_dir: Path, instruction_text: str = "") -> ExcelEditResult:
-    """Apply explicit Excel edits, then return a formatted copy."""
+def edit_excel_workbook(
+    source: Path,
+    output_dir: Path,
+    instruction_text: str = "",
+    plan: dict[str, Any] | None = None,
+) -> ExcelEditResult:
+    """Apply planned Excel edits, then return a formatted copy."""
     workbook = load_workbook(str(source))
     applied: list[str] = []
     skipped: list[str] = []
 
-    requested_columns = _extract_delete_column_requests(instruction_text)
-    if requested_columns:
-        for sheet in workbook.worksheets:
-            header_row = _find_header_row(sheet)
-            deleted = _delete_requested_columns(sheet, header_row, requested_columns)
-            if deleted:
-                applied.append(
-                    f"{sheet.title}: deleted column(s) {', '.join(deleted)}"
+    actions = _normalize_excel_plan_actions(plan)
+    if not actions:
+        requested_columns = _extract_delete_column_requests(instruction_text)
+        if requested_columns:
+            actions.append({"type": "delete_columns", "columns": requested_columns})
+
+    for sheet in workbook.worksheets:
+        header_row = _find_header_row(sheet)
+        for action in actions:
+            action_type = str(action.get("type", "")).lower().strip()
+            if action_type == "delete_columns":
+                requested_columns = _string_list(action.get("columns"))
+                deleted = _delete_requested_columns(sheet, header_row, requested_columns)
+                if deleted:
+                    applied.append(f"{sheet.title}: deleted column(s) {', '.join(deleted)}")
+                elif requested_columns:
+                    skipped.append(f"{sheet.title}: sikuipata column {', '.join(requested_columns)}")
+            elif action_type == "keep_columns":
+                requested_columns = _string_list(action.get("columns"))
+                kept = _keep_requested_columns(sheet, header_row, requested_columns)
+                if kept:
+                    applied.append(f"{sheet.title}: kept only {', '.join(kept)}")
+                elif requested_columns:
+                    skipped.append(f"{sheet.title}: sikuipata columns za kubakiza")
+            elif action_type == "rename_columns":
+                renamed = _rename_requested_columns(sheet, header_row, action.get("columns"))
+                if renamed:
+                    applied.append(f"{sheet.title}: renamed {', '.join(renamed)}")
+                else:
+                    skipped.append(f"{sheet.title}: sikuweza kubadilisha header")
+            elif action_type == "sort_by":
+                sorted_by = _sort_sheet_by_column(
+                    sheet,
+                    header_row,
+                    str(action.get("column") or ""),
+                    str(action.get("direction") or "asc"),
                 )
-            else:
-                skipped.append(
-                    f"{sheet.title}: sikuipata column {', '.join(requested_columns)}"
-                )
+                if sorted_by:
+                    applied.append(f"{sheet.title}: sorted by {sorted_by}")
+                else:
+                    skipped.append(f"{sheet.title}: sikuweza kusort column hiyo")
 
     heading = _extract_heading(instruction_text, source)
+    if plan and str(plan.get("title") or "").strip():
+        heading = _clean_heading(str(plan["title"]))
     for sheet in workbook.worksheets:
         _clean_sheet(sheet, heading)
 
@@ -102,6 +137,39 @@ def edit_excel_workbook(source: Path, output_dir: Path, instruction_text: str = 
     target = output_dir / output_name
     workbook.save(str(target))
     return ExcelEditResult(path=target, applied=applied, skipped=skipped)
+
+
+def excel_workbook_preview(source: Path, max_rows: int = 8) -> str:
+    workbook = load_workbook(str(source), data_only=True, read_only=True)
+    try:
+        chunks: list[str] = []
+        for sheet in workbook.worksheets:
+            rows: list[list[str]] = []
+            for row in sheet.iter_rows(values_only=True):
+                values = ["" if value is None else str(value) for value in row]
+                if any(value.strip() for value in values):
+                    rows.append(values)
+                if len(rows) >= max_rows:
+                    break
+            if not rows:
+                chunks.append(f"Sheet: {sheet.title}\n(empty)")
+                continue
+            header_index = _guess_header_index(rows)
+            headers = rows[header_index] if header_index is not None else rows[0]
+            sample_rows = rows[header_index + 1 : header_index + 4] if header_index is not None else rows[1:4]
+            chunks.append(
+                "\n".join(
+                    [
+                        f"Sheet: {sheet.title}",
+                        "Likely headers: " + " | ".join(headers),
+                        "Sample rows:",
+                        *[" | ".join(row) for row in sample_rows],
+                    ]
+                )
+            )
+        return "\n\n".join(chunks)
+    finally:
+        workbook.close()
 
 
 def is_specific_excel_edit_requested(text: str) -> bool:
@@ -347,6 +415,66 @@ def _delete_requested_columns(sheet: Any, header_row: int, requested_columns: li
     return list(reversed(deleted_labels))
 
 
+def _keep_requested_columns(sheet: Any, header_row: int, requested_columns: list[str]) -> list[str]:
+    keep_indexes: set[int] = set()
+    kept_labels: list[str] = []
+    for request in requested_columns:
+        col_idx = _match_column(sheet, header_row, request)
+        if col_idx:
+            keep_indexes.add(col_idx)
+            header = sheet.cell(header_row, col_idx).value
+            kept_labels.append(str(header).strip() if header not in (None, "") else get_column_letter(col_idx))
+    if not keep_indexes:
+        return []
+    for col_idx in range(sheet.max_column, 0, -1):
+        if col_idx not in keep_indexes:
+            sheet.delete_cols(col_idx)
+    return _unique_preserve_order(kept_labels)
+
+
+def _rename_requested_columns(sheet: Any, header_row: int, columns: Any) -> list[str]:
+    if not isinstance(columns, dict):
+        return []
+    renamed: list[str] = []
+    for old_name, new_name in columns.items():
+        if not str(new_name).strip():
+            continue
+        col_idx = _match_column(sheet, header_row, str(old_name))
+        if col_idx:
+            old_value = sheet.cell(header_row, col_idx).value
+            sheet.cell(header_row, col_idx).value = str(new_name).strip()
+            renamed.append(f"{old_value or old_name} to {new_name}")
+    return renamed
+
+
+def _sort_sheet_by_column(sheet: Any, header_row: int, column: str, direction: str) -> str | None:
+    col_idx = _match_column(sheet, header_row, column)
+    if not col_idx:
+        return None
+    rows = list(sheet.iter_rows(min_row=header_row + 1, max_row=sheet.max_row, values_only=False))
+    non_empty_rows = [
+        [cell.value for cell in row]
+        for row in rows
+        if any(cell.value not in (None, "") for cell in row)
+    ]
+    if len(non_empty_rows) < 2:
+        return None
+    reverse = direction.lower().startswith("desc")
+    value_index = col_idx - 1
+    non_empty_rows.sort(key=lambda row: _sort_value(row[value_index] if value_index < len(row) else None), reverse=reverse)
+    sheet.delete_rows(header_row + 1, sheet.max_row - header_row)
+    for row in non_empty_rows:
+        sheet.append(row)
+    header = sheet.cell(header_row, col_idx).value
+    return str(header or column)
+
+
+def _sort_value(value: Any) -> tuple[int, str]:
+    if value in (None, ""):
+        return (1, "")
+    return (0, str(value).lower())
+
+
 def _match_column(sheet: Any, header_row: int, request: str) -> int | None:
     cleaned_request = _normalize_header(request)
     if not cleaned_request:
@@ -408,6 +536,44 @@ def _unique_preserve_order(values: list[str]) -> list[str]:
             seen.add(key)
             result.append(value)
     return result
+
+
+def _normalize_excel_plan_actions(plan: dict[str, Any] | None) -> list[dict[str, Any]]:
+    if not isinstance(plan, dict):
+        return []
+    actions = plan.get("actions")
+    if not isinstance(actions, list):
+        return []
+    normalized: list[dict[str, Any]] = []
+    allowed = {"delete_columns", "keep_columns", "rename_columns", "sort_by"}
+    for action in actions:
+        if isinstance(action, dict) and str(action.get("type", "")).lower().strip() in allowed:
+            normalized.append(action)
+    return normalized
+
+
+def _string_list(value: Any) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return []
+
+
+def _guess_header_index(rows: list[list[str]]) -> int | None:
+    best_index: int | None = None
+    best_score = -1
+    for index, row in enumerate(rows[:5]):
+        non_empty = [value for value in row if value.strip()]
+        score = len(non_empty) + sum(1 for value in non_empty if not _looks_number_like(value))
+        if len(non_empty) >= 2 and score > best_score:
+            best_index = index
+            best_score = score
+    return best_index
+
+
+def _looks_number_like(value: str) -> bool:
+    return bool(re.fullmatch(r"[\d\s,.-]+", value.strip()))
 
 
 def _extract_heading(instruction_text: str, source: Path) -> str:
@@ -565,19 +731,22 @@ def _extract_docx(path: Path) -> str:
 
 def _extract_xlsx(path: Path) -> str:
     workbook = load_workbook(str(path), data_only=True, read_only=True)
-    chunks: list[str] = []
-    for sheet in workbook.worksheets:
-        rows: list[str] = []
-        for row in sheet.iter_rows(values_only=True):
-            values = ["" if value is None else str(value) for value in row]
-            if any(value.strip() for value in values):
-                rows.append(" | ".join(values))
-            if len(rows) >= 200:
-                rows.append("[Sheet truncated after 200 non-empty rows]")
-                break
-        if rows:
-            chunks.append(f"--- Sheet: {sheet.title} ---\n" + "\n".join(rows))
-    return "\n\n".join(chunks)
+    try:
+        chunks: list[str] = []
+        for sheet in workbook.worksheets:
+            rows: list[str] = []
+            for row in sheet.iter_rows(values_only=True):
+                values = ["" if value is None else str(value) for value in row]
+                if any(value.strip() for value in values):
+                    rows.append(" | ".join(values))
+                if len(rows) >= 200:
+                    rows.append("[Sheet truncated after 200 non-empty rows]")
+                    break
+            if rows:
+                chunks.append(f"--- Sheet: {sheet.title} ---\n" + "\n".join(rows))
+        return "\n\n".join(chunks)
+    finally:
+        workbook.close()
 
 
 def _extract_csv(path: Path) -> str:

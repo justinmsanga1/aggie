@@ -1,10 +1,12 @@
+import json
+import re
 from pathlib import Path
 from typing import Any
 
 from anthropic import AsyncAnthropic
 
 from app.config import Settings
-from app.documents import IMAGE_MIME_TYPES, build_image_content_block, extract_document_text
+from app.documents import IMAGE_MIME_TYPES, build_image_content_block, excel_workbook_preview, extract_document_text
 from app.knowledge import load_knowledge
 from app.memory import ConversationMemory
 
@@ -87,6 +89,69 @@ class ClaudeAgent:
         self.memory.add_message(wa_id, "assistant", reply)
         return reply or "I received it, but I could not create a useful response yet."
 
+    async def plan_excel_edits(
+        self,
+        wa_id: str,
+        user_text: str,
+        attachment: dict[str, Any],
+    ) -> dict[str, Any]:
+        if not self.settings.anthropic_api_key:
+            return {"can_execute": True, "actions": [], "summary": "Format workbook"}
+
+        path = Path(attachment["path"])
+        preview = excel_workbook_preview(path)
+        prompt = f"""
+You are planning real edits for an Excel file. The user is a stock manager and may speak English, Swahili, or mixed casual WhatsApp language.
+
+Understand the user's intention from normal language. Do not require commands.
+
+Return ONLY valid JSON, no markdown, no explanation.
+
+Supported actions:
+- delete_columns: {{"type":"delete_columns","columns":["column name or letter"]}}
+- keep_columns: {{"type":"keep_columns","columns":["columns to keep"]}}
+- rename_columns: {{"type":"rename_columns","columns":{{"old name":"new name"}}}}
+- sort_by: {{"type":"sort_by","column":"column name","direction":"asc or desc"}}
+
+If the user only asks to clean/format/arrange/make it neat, return can_execute true with an empty actions list.
+If the user asks for an edit but it is unclear which column/operation, return can_execute false and one short Swahili/English question.
+Use exact column names from the preview when possible. Never invent columns that are not in the workbook preview.
+
+JSON shape:
+{{
+  "can_execute": true,
+  "question": "",
+  "title": "short workbook title if useful, else empty",
+  "actions": [],
+  "summary": "short human summary"
+}}
+
+User message: {user_text or "Help with this Excel file"}
+
+Workbook preview:
+{preview[:12000]}
+""".strip()
+
+        response = await self._client().messages.create(
+            model=self.settings.claude_model,
+            max_tokens=900,
+            temperature=0,
+            system="Return only valid JSON for Excel edit planning.",
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = "".join(
+            block.text for block in response.content if getattr(block, "type", None) == "text"
+        ).strip()
+        plan = _parse_json_object(raw)
+        if not isinstance(plan, dict):
+            return {
+                "can_execute": False,
+                "question": "Sijaelewa vizuri nifanye edit gani kwenye Excel. Niambie nibadilishe nini?",
+                "actions": [],
+                "summary": "",
+            }
+        return plan
+
     def _build_system_prompt(self, preferences: str, knowledge: str, private_profile: str) -> str:
         parts = [SYSTEM_PROMPT]
         if preferences.strip():
@@ -157,3 +222,18 @@ class ClaudeAgent:
     def _attachment_summary(self, attachments: list[dict[str, Any]]) -> str:
         names = [str(item.get("filename") or Path(item["path"]).name) for item in attachments]
         return "Attached files: " + ", ".join(names)
+
+
+def _parse_json_object(raw: str) -> dict[str, Any] | None:
+    try:
+        value = json.loads(raw)
+        return value if isinstance(value, dict) else None
+    except json.JSONDecodeError:
+        match = re.search(r"\{.*\}", raw, flags=re.DOTALL)
+        if not match:
+            return None
+        try:
+            value = json.loads(match.group(0))
+            return value if isinstance(value, dict) else None
+        except json.JSONDecodeError:
+            return None

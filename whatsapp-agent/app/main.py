@@ -18,7 +18,6 @@ from app.documents import (
     clean_docx_document,
     edit_excel_workbook,
     has_excel_attachment,
-    is_specific_excel_edit_requested,
 )
 from app.memory import ConversationMemory
 from app.whatsapp import WhatsAppClient
@@ -268,20 +267,31 @@ async def _handle_message(message: dict[str, Any]) -> None:
         excel_attachment = next(
             item for item in attachments if _is_excel_path_or_mime(item)
         )
+        plan = await agent.plan_excel_edits(wa_id, text, excel_attachment)
+        if plan.get("can_execute") is False:
+            await whatsapp.send_text(
+                wa_id,
+                str(plan.get("question") or "Sijaelewa vizuri nifanye edit gani kwenye Excel. Niambie nibadilishe nini?"),
+            )
+            return
+
         edit_result = edit_excel_workbook(
             Path(excel_attachment["path"]),
             settings.output_dir,
             instruction_text=text,
+            plan=plan,
         )
-        if is_specific_excel_edit_requested(text) and not edit_result.applied:
+        requested_actions = plan.get("actions") if isinstance(plan.get("actions"), list) else []
+        if requested_actions and not edit_result.applied:
             await whatsapp.send_text(
                 wa_id,
-                "Nimefungua Excel, lakini sijaipata hiyo column. Niambie jina lake exactly kama linavyoonekana kwenye header.",
+                str(plan.get("question") or "Nimefungua Excel, lakini sijaweza kuapply hiyo edit. Niambie column au mabadiliko unayotaka exactly."),
             )
             return
 
         cleaned_file = edit_result.path
         applied_text = "; ".join(edit_result.applied)
+        summary = str(plan.get("summary") or "").strip()
         caption = (
             "Nime-edit Excel file. Unaweza ku-download hii version hapa."
             if applied_text
@@ -296,10 +306,12 @@ async def _handle_message(message: dict[str, Any]) -> None:
         memory.add_message(
             wa_id,
             "assistant",
-            f"Sent edited Excel file: {cleaned_file.name}. {applied_text}",
+            f"Sent edited Excel file: {cleaned_file.name}. {applied_text or summary}",
         )
         if applied_text:
             await whatsapp.send_text(wa_id, f"Done, nimetuma file mpya. {applied_text}.")
+        elif summary:
+            await whatsapp.send_text(wa_id, f"Done, nimetuma file mpya. {summary}.")
         else:
             await whatsapp.send_text(
                 wa_id,
