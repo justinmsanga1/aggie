@@ -61,6 +61,10 @@ async def debug_config() -> dict[str, bool | str]:
         "upload_dir": str(settings.upload_dir),
         "output_dir": str(settings.output_dir),
         "knowledge_dir": str(settings.knowledge_dir),
+        "persistent_pending_file_store_set": bool(
+            (settings.kv_rest_api_url and settings.kv_rest_api_token)
+            or (settings.upstash_redis_rest_url and settings.upstash_redis_rest_token)
+        ),
     }
 
 
@@ -144,6 +148,12 @@ async def _handle_message(message: dict[str, Any]) -> None:
                     "File ya mwanzo ime-expire kabla sijai-download tena. Nitume tena hiyo Excel na instruction pamoja.",
                 )
                 return
+        else:
+            await whatsapp.send_text(
+                wa_id,
+                "Sijaipata ile Excel kwenye server hii. Nitume Excel tena ukiweka instruction kwenye caption ya file, nitairudisha ikiwa edited.",
+            )
+            return
 
     if len(attachments) >= 2 and _wants_comparison(text):
         comparison_text = await agent.answer(

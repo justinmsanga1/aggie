@@ -1,6 +1,10 @@
 import sqlite3
+import json
+import os
 from pathlib import Path
 from typing import Any
+
+import httpx
 
 
 class ConversationMemory:
@@ -110,6 +114,14 @@ class ConversationMemory:
         filename: str | None,
         mime_type: str | None,
     ) -> None:
+        payload = {
+            "media_id": media_id,
+            "filename": filename or "",
+            "mime_type": mime_type or "",
+        }
+        if _redis_set(f"pending_file:{wa_id}", payload):
+            return
+
         with self._connect() as conn:
             conn.execute(
                 """
@@ -125,6 +137,14 @@ class ConversationMemory:
             )
 
     def get_pending_file(self, wa_id: str) -> dict[str, Any] | None:
+        redis_value = _redis_get(f"pending_file:{wa_id}")
+        if redis_value:
+            return {
+                "media_id": redis_value.get("media_id"),
+                "filename": redis_value.get("filename") or None,
+                "mime_type": redis_value.get("mime_type") or None,
+            }
+
         with self._connect() as conn:
             row = conn.execute(
                 """
@@ -143,5 +163,78 @@ class ConversationMemory:
         }
 
     def clear_pending_file(self, wa_id: str) -> None:
+        _redis_delete(f"pending_file:{wa_id}")
         with self._connect() as conn:
             conn.execute("DELETE FROM pending_files WHERE wa_id = ?", (wa_id,))
+
+
+def _redis_config() -> tuple[str, str] | None:
+    url = (
+        os.environ.get("KV_REST_API_URL")
+        or os.environ.get("UPSTASH_REDIS_REST_URL")
+        or ""
+    ).strip().rstrip("/")
+    token = (
+        os.environ.get("KV_REST_API_TOKEN")
+        or os.environ.get("UPSTASH_REDIS_REST_TOKEN")
+        or ""
+    ).strip()
+    if not url or not token:
+        return None
+    return url, token
+
+
+def _redis_set(key: str, value: dict[str, Any], ttl_seconds: int = 86400) -> bool:
+    config = _redis_config()
+    if not config:
+        return False
+    url, token = config
+    try:
+        with httpx.Client(timeout=10) as client:
+            response = client.post(
+                url,
+                headers={"Authorization": f"Bearer {token}"},
+                json=["SET", key, json.dumps(value), "EX", str(ttl_seconds)],
+            )
+            response.raise_for_status()
+        return True
+    except Exception:
+        return False
+
+
+def _redis_get(key: str) -> dict[str, Any] | None:
+    config = _redis_config()
+    if not config:
+        return None
+    url, token = config
+    try:
+        with httpx.Client(timeout=10) as client:
+            response = client.post(
+                url,
+                headers={"Authorization": f"Bearer {token}"},
+                json=["GET", key],
+            )
+            response.raise_for_status()
+        raw_value = response.json().get("result")
+        if not raw_value:
+            return None
+        value = json.loads(raw_value)
+        return value if isinstance(value, dict) else None
+    except Exception:
+        return None
+
+
+def _redis_delete(key: str) -> None:
+    config = _redis_config()
+    if not config:
+        return
+    url, token = config
+    try:
+        with httpx.Client(timeout=10) as client:
+            client.post(
+                url,
+                headers={"Authorization": f"Bearer {token}"},
+                json=["DEL", key],
+            )
+    except Exception:
+        return

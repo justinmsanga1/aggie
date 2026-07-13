@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     knowledge_dir: Path = Field(default=Path("./knowledge"), alias="KNOWLEDGE_DIR")
     max_history_messages: int = Field(default=12, alias="MAX_HISTORY_MESSAGES")
     aggie_private_profile: str = Field(default="", alias="AGGIE_PRIVATE_PROFILE")
+    kv_rest_api_url: str = Field(default="", alias="KV_REST_API_URL")
+    kv_rest_api_token: str = Field(default="", alias="KV_REST_API_TOKEN")
+    upstash_redis_rest_url: str = Field(default="", alias="UPSTASH_REDIS_REST_URL")
+    upstash_redis_rest_token: str = Field(default="", alias="UPSTASH_REDIS_REST_TOKEN")
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
