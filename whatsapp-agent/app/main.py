@@ -108,6 +108,68 @@ async def _handle_message(message: dict[str, Any]) -> None:
         )
         return
 
+    if attachments and _wants_invoice_or_business_document_processing(text):
+        analysis_text = await agent.answer(
+            wa_id=wa_id,
+            user_text=(
+                "Analyze the attached business document as an invoice, receipt, delivery note, "
+                "purchase order, stock note, or stock document. Extract all useful data. "
+                "Return clean markdown with these exact sections when possible:\n"
+                "# Document Analysis\n"
+                "## Key Fields\n"
+                "Field | Value\n"
+                "Document Type | \n"
+                "Document Number | \n"
+                "Date | \n"
+                "Supplier/Customer | \n"
+                "Currency | \n"
+                "Subtotal | \n"
+                "Tax/VAT | \n"
+                "Total | \n"
+                "Payment Status | \n\n"
+                "## Line Items\n"
+                "Item | Description | Quantity | Unit Price | Total | Remarks\n\n"
+                "## Issues Or Checks\n"
+                "- Missing fields, mismatched totals, unclear numbers, duplicate items, or anything suspicious.\n\n"
+                "## Recommended Action\n"
+                "- What the stock manager should do next.\n\n"
+                "Do not invent missing values. Use 'Not clear' when unsure.\n"
+                f"User instruction: {text or 'Analyze this document'}"
+            ),
+            attachments=attachments,
+        )
+
+        if _wants_pdf(text):
+            report_file = create_pdf_report(analysis_text, settings.output_dir, "Document Analysis")
+            await whatsapp.send_document(
+                wa_id,
+                report_file,
+                caption="Nimechambua document na kuandaa PDF report.",
+                mime_type=PDF_MIME_TYPE,
+            )
+        elif _wants_word(text):
+            report_file = create_docx_report(analysis_text, settings.output_dir, "Document Analysis")
+            await whatsapp.send_document(
+                wa_id,
+                report_file,
+                caption="Nimechambua document na kuandaa Word report.",
+                mime_type=DOCX_MIME_TYPE,
+            )
+        else:
+            excel_file = create_excel_from_text(analysis_text, settings.output_dir, "Document Analysis")
+            await whatsapp.send_document(
+                wa_id,
+                excel_file,
+                caption="Nimeextract data kwenye Excel tracker. Unaweza ku-download hapa.",
+                mime_type=XLSX_MIME_TYPE,
+            )
+
+        await whatsapp.send_text(
+            wa_id,
+            "Done. Nimechambua document, nimeextract key fields/line items, na nimekuwekea file hapo juu.",
+        )
+        return
+
     if attachments and _wants_report_file(text):
         report_text = await agent.answer(
             wa_id=wa_id,
@@ -244,6 +306,51 @@ def _looks_like_missing_file_followup(text: str) -> bool:
 def _wants_pdf(text: str) -> bool:
     lowered = text.lower()
     return "pdf" in lowered
+
+
+def _wants_word(text: str) -> bool:
+    lowered = text.lower()
+    return "word" in lowered or "docx" in lowered
+
+
+def _wants_invoice_or_business_document_processing(text: str) -> bool:
+    lowered = text.lower()
+    document_words = [
+        "invoice",
+        "receipt",
+        "risiti",
+        "ankara",
+        "delivery note",
+        "purchase order",
+        "po",
+        "grn",
+        "goods received",
+        "supplier",
+        "stock note",
+        "stakabadhi",
+        "document",
+        "doc",
+    ]
+    action_words = [
+        "analyze",
+        "analyse",
+        "chambua",
+        "angalia",
+        "check",
+        "review",
+        "extract",
+        "toa",
+        "organize",
+        "panga",
+        "weka kwenye excel",
+        "convert",
+        "summary",
+        "summarize",
+        "report",
+    ]
+    return any(word in lowered for word in document_words) and any(
+        word in lowered for word in action_words
+    )
 
 
 def _wants_report_file(text: str) -> bool:
