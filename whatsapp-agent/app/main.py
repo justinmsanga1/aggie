@@ -168,6 +168,9 @@ async def _handle_message(message: dict[str, Any]) -> None:
         await whatsapp.send_text(wa_id, "Done, nimelinganisha documents na nimetuma file hapo juu.")
         return
 
+    if await _handle_excel_attachment(wa_id, text, attachments):
+        return
+
     if attachments and _wants_invoice_or_business_document_processing(text):
         analysis_text = await agent.answer(
             wa_id=wa_id,
@@ -290,71 +293,6 @@ async def _handle_message(message: dict[str, Any]) -> None:
             await whatsapp.send_text(wa_id, "Done, nimetuma Word document mpya hapo juu.")
             return
 
-    if has_excel_attachment(attachments):
-        excel_attachment = next(
-            item for item in attachments if _is_excel_path_or_mime(item)
-        )
-        instruction_text = _effective_file_instruction(wa_id, text)
-        if not instruction_text:
-            await whatsapp.send_text(
-                wa_id,
-                "Nimeipokea Excel. Niambie nifanye nini kwenye file hii?",
-            )
-            return
-
-        plan = await agent.plan_excel_edits(wa_id, instruction_text, excel_attachment)
-        if plan.get("can_execute") is False:
-            await whatsapp.send_text(
-                wa_id,
-                str(plan.get("question") or "Sijaelewa vizuri nifanye edit gani kwenye Excel. Niambie nibadilishe nini?"),
-            )
-            return
-
-        edit_result = edit_excel_workbook(
-            Path(excel_attachment["path"]),
-            settings.output_dir,
-            instruction_text=instruction_text,
-            plan=plan,
-        )
-        requested_actions = plan.get("actions") if isinstance(plan.get("actions"), list) else []
-        if requested_actions and not edit_result.applied:
-            await whatsapp.send_text(
-                wa_id,
-                str(plan.get("question") or "Nimefungua Excel, lakini sijaweza kuapply hiyo edit. Niambie column au mabadiliko unayotaka exactly."),
-            )
-            return
-
-        cleaned_file = edit_result.path
-        applied_text = "; ".join(edit_result.applied)
-        summary = str(plan.get("summary") or "").strip()
-        caption = (
-            "Nime-edit Excel file. Unaweza ku-download hii version hapa."
-            if applied_text
-            else "Nimeformat Excel file na kuongeza heading/format safi. Unaweza ku-download hii version hapa."
-        )
-        await whatsapp.send_document(
-            wa_id,
-            cleaned_file,
-            caption=caption,
-            mime_type=XLSX_MIME_TYPE,
-        )
-        memory.add_message(
-            wa_id,
-            "assistant",
-            f"Sent edited Excel file: {cleaned_file.name}. {applied_text or summary}",
-        )
-        if applied_text:
-            await whatsapp.send_text(wa_id, f"Done, nimetuma file mpya. {applied_text}.")
-        elif summary:
-            await whatsapp.send_text(wa_id, f"Done, nimetuma file mpya. {summary}.")
-        else:
-            await whatsapp.send_text(
-                wa_id,
-                "Done, nimetuma file mpya. Nimeweka heading, filter, freeze pane, na columns zisomeke vizuri.",
-            )
-        memory.clear_pending_file(wa_id)
-        return
-
     if _looks_like_missing_file_followup(text):
         await whatsapp.send_text(
             wa_id,
@@ -365,6 +303,79 @@ async def _handle_message(message: dict[str, Any]) -> None:
 
     reply = await agent.answer(wa_id=wa_id, user_text=text, attachments=attachments)
     await _send_reply_messages(wa_id, reply)
+
+
+async def _handle_excel_attachment(
+    wa_id: str,
+    text: str,
+    attachments: list[dict[str, Any]],
+) -> bool:
+    if not has_excel_attachment(attachments):
+        return False
+
+    excel_attachment = next(
+        item for item in attachments if _is_excel_path_or_mime(item)
+    )
+    instruction_text = _effective_file_instruction(wa_id, text)
+    if not instruction_text:
+        await whatsapp.send_text(
+            wa_id,
+            "Nimeipokea Excel. Niambie nifanye nini kwenye file hii?",
+        )
+        return True
+
+    plan = await agent.plan_excel_edits(wa_id, instruction_text, excel_attachment)
+    if plan.get("can_execute") is False:
+        await whatsapp.send_text(
+            wa_id,
+            str(plan.get("question") or "Sijaelewa vizuri nifanye edit gani kwenye Excel. Niambie nibadilishe nini?"),
+        )
+        return True
+
+    edit_result = edit_excel_workbook(
+        Path(excel_attachment["path"]),
+        settings.output_dir,
+        instruction_text=instruction_text,
+        plan=plan,
+    )
+    requested_actions = plan.get("actions") if isinstance(plan.get("actions"), list) else []
+    if requested_actions and not edit_result.applied:
+        await whatsapp.send_text(
+            wa_id,
+            str(plan.get("question") or "Nimefungua Excel, lakini sijaweza kuapply hiyo edit. Niambie column au mabadiliko unayotaka exactly."),
+        )
+        return True
+
+    cleaned_file = edit_result.path
+    applied_text = "; ".join(edit_result.applied)
+    summary = str(plan.get("summary") or "").strip()
+    caption = (
+        "Nime-edit Excel file. Unaweza ku-download hii version hapa."
+        if applied_text
+        else "Nimeformat Excel file na kuongeza heading/format safi. Unaweza ku-download hii version hapa."
+    )
+    await whatsapp.send_document(
+        wa_id,
+        cleaned_file,
+        caption=caption,
+        mime_type=XLSX_MIME_TYPE,
+    )
+    memory.add_message(
+        wa_id,
+        "assistant",
+        f"Sent edited Excel file: {cleaned_file.name}. {applied_text or summary}",
+    )
+    if applied_text:
+        await whatsapp.send_text(wa_id, f"Done, nimetuma file mpya. {applied_text}.")
+    elif summary:
+        await whatsapp.send_text(wa_id, f"Done, nimetuma file mpya. {summary}.")
+    else:
+        await whatsapp.send_text(
+            wa_id,
+            "Done, nimetuma file mpya. Nimeweka heading, filter, freeze pane, na columns zisomeke vizuri.",
+        )
+    memory.clear_pending_file(wa_id)
+    return True
 
 
 def _iter_messages(payload: dict[str, Any]) -> list[dict[str, Any]]:
