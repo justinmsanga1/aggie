@@ -7,7 +7,17 @@ from fastapi.responses import PlainTextResponse
 
 from app.claude_agent import ClaudeAgent
 from app.config import get_settings
-from app.documents import XLSX_MIME_TYPE, clean_excel_workbook, has_excel_attachment
+from app.documents import (
+    DOCX_MIME_TYPE,
+    PDF_MIME_TYPE,
+    XLSX_MIME_TYPE,
+    clean_excel_workbook,
+    combined_attachment_text,
+    create_docx_report,
+    create_excel_from_text,
+    create_pdf_report,
+    has_excel_attachment,
+)
 from app.memory import ConversationMemory
 from app.whatsapp import WhatsAppClient
 
@@ -98,6 +108,49 @@ async def _handle_message(message: dict[str, Any]) -> None:
         )
         return
 
+    if attachments and _wants_report_file(text):
+        report_text = await agent.answer(
+            wa_id=wa_id,
+            user_text=(
+                "Create a clean final report from the attached content. "
+                "Use clear headings, organized sections, tables where useful, totals/issues/remarks if available. "
+                "Return only the report content, no explanation.\n\n"
+                f"User instruction: {text or 'Prepare a clean report'}"
+            ),
+            attachments=attachments,
+        )
+        if _wants_pdf(text):
+            report_file = create_pdf_report(report_text, settings.output_dir, _report_title(text))
+            await whatsapp.send_document(
+                wa_id,
+                report_file,
+                caption="Nimekuandalia PDF report. Unaweza ku-download hapa.",
+                mime_type=PDF_MIME_TYPE,
+            )
+        else:
+            report_file = create_docx_report(report_text, settings.output_dir, _report_title(text))
+            await whatsapp.send_document(
+                wa_id,
+                report_file,
+                caption="Nimekuandalia Word report. Unaweza ku-download hapa.",
+                mime_type=DOCX_MIME_TYPE,
+            )
+        await whatsapp.send_text(wa_id, "Done, nimetuma report file hapo juu.")
+        return
+
+    if attachments and _wants_excel_output(text) and not has_excel_attachment(attachments):
+        source_text = combined_attachment_text(attachments)
+        if source_text:
+            excel_file = create_excel_from_text(source_text, settings.output_dir, _report_title(text))
+            await whatsapp.send_document(
+                wa_id,
+                excel_file,
+                caption="Nimeorganize data kwenye Excel file. Unaweza ku-download hapa.",
+                mime_type=XLSX_MIME_TYPE,
+            )
+            await whatsapp.send_text(wa_id, "Done, nimeconvert/organize data kuwa Excel.")
+            return
+
     if has_excel_attachment(attachments):
         excel_attachment = next(
             item for item in attachments if _is_excel_path_or_mime(item)
@@ -186,3 +239,56 @@ def _looks_like_missing_file_followup(text: str) -> bool:
         ]
     )
     return mentions_file and missing
+
+
+def _wants_pdf(text: str) -> bool:
+    lowered = text.lower()
+    return "pdf" in lowered
+
+
+def _wants_report_file(text: str) -> bool:
+    lowered = text.lower()
+    wants_report = any(
+        word in lowered
+        for word in [
+            "report",
+            "ripoti",
+            "pdf",
+            "word",
+            "docx",
+            "document",
+            "andaa",
+            "prepare",
+            "summary",
+            "summarize",
+        ]
+    )
+    wants_excel = _wants_excel_output(text)
+    return wants_report and not wants_excel
+
+
+def _wants_excel_output(text: str) -> bool:
+    lowered = text.lower()
+    return any(
+        word in lowered
+        for word in [
+            "excel",
+            "xlsx",
+            "spreadsheet",
+            "table",
+            "jedwali",
+            "convert to excel",
+            "weka kwenye excel",
+        ]
+    )
+
+
+def _report_title(text: str) -> str:
+    lowered = text.lower()
+    if "stock" in lowered or "stoo" in lowered:
+        return "Stock Report"
+    if "daily" in lowered or "leo" in lowered:
+        return "Daily Report"
+    if "weekly" in lowered or "wiki" in lowered:
+        return "Weekly Report"
+    return "Aggie Report"

@@ -11,9 +11,14 @@ from openpyxl import load_workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 from pypdf import PdfReader
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 
 
 IMAGE_MIME_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
+DOCX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+PDF_MIME_TYPE = "application/pdf"
 XLSX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 
@@ -58,6 +63,71 @@ def clean_excel_workbook(source: Path, output_dir: Path, instruction_text: str =
     target = output_dir / output_name
     workbook.save(str(target))
     return target
+
+
+def create_docx_report(content: str, output_dir: Path, title: str = "Aggie Report") -> Path:
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    target = output_dir / f"aggie-report-{timestamp}.docx"
+    doc = Document()
+    doc.add_heading(title, 0)
+    for block in _split_blocks(content):
+        if block.startswith("# "):
+            doc.add_heading(block[2:].strip(), level=1)
+        elif block.startswith("## "):
+            doc.add_heading(block[3:].strip(), level=2)
+        elif _looks_like_table(block):
+            _add_docx_table(doc, block)
+        else:
+            doc.add_paragraph(block)
+    doc.save(str(target))
+    return target
+
+
+def create_pdf_report(content: str, output_dir: Path, title: str = "Aggie Report") -> Path:
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    target = output_dir / f"aggie-report-{timestamp}.pdf"
+    styles = getSampleStyleSheet()
+    story: list[Any] = [Paragraph(title, styles["Title"]), Spacer(1, 12)]
+    for block in _split_blocks(content):
+        if block.startswith("# "):
+            story.append(Paragraph(block[2:].strip(), styles["Heading1"]))
+        elif block.startswith("## "):
+            story.append(Paragraph(block[3:].strip(), styles["Heading2"]))
+        else:
+            safe = block.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            story.append(Paragraph(safe.replace("\n", "<br/>"), styles["BodyText"]))
+        story.append(Spacer(1, 8))
+    SimpleDocTemplate(str(target), pagesize=A4).build(story)
+    return target
+
+
+def create_excel_from_text(content: str, output_dir: Path, title: str = "Organized Data") -> Path:
+    from openpyxl import Workbook
+
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    target = output_dir / f"organized-data-{timestamp}.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Organized Data"
+    rows = _text_to_rows(content)
+    if not rows:
+        rows = [["Content"], [content[:30000]]]
+    for row in rows:
+        sheet.append(row)
+    _clean_sheet(sheet, title)
+    workbook.save(str(target))
+    return target
+
+
+def combined_attachment_text(attachments: list[dict[str, Any]]) -> str:
+    chunks: list[str] = []
+    for attachment in attachments:
+        path = Path(attachment["path"])
+        mime_type = attachment.get("mime_type")
+        text = extract_document_text(path, mime_type).strip()
+        if text:
+            chunks.append(f"--- {attachment.get('filename') or path.name} ---\n{text}")
+    return "\n\n".join(chunks)
 
 
 def should_create_clean_excel(text: str, attachments: list[dict[str, Any]]) -> bool:
@@ -188,6 +258,55 @@ def _auto_size_columns(sheet: Any) -> None:
             value = "" if cell.value is None else str(cell.value)
             max_len = max(max_len, min(len(value), 45))
         sheet.column_dimensions[letter].width = max_len + 2
+
+
+def _split_blocks(content: str) -> list[str]:
+    return [block.strip() for block in re.split(r"\n\s*\n", content.strip()) if block.strip()]
+
+
+def _looks_like_table(block: str) -> bool:
+    lines = [line for line in block.splitlines() if line.strip()]
+    return len(lines) >= 2 and all("|" in line for line in lines[:2])
+
+
+def _add_docx_table(doc: Document, block: str) -> None:
+    rows = _text_to_rows(block)
+    if not rows:
+        doc.add_paragraph(block)
+        return
+    table = doc.add_table(rows=len(rows), cols=max(len(row) for row in rows))
+    table.style = "Table Grid"
+    for row_idx, row in enumerate(rows):
+        for col_idx, value in enumerate(row):
+            cell = table.cell(row_idx, col_idx)
+            cell.text = value
+            if row_idx == 0:
+                for paragraph in cell.paragraphs:
+                    for run in paragraph.runs:
+                        run.bold = True
+
+
+def _text_to_rows(content: str) -> list[list[str]]:
+    rows: list[list[str]] = []
+    for line in content.splitlines():
+        cleaned = line.strip().strip("|")
+        if not cleaned:
+            continue
+        if set(cleaned.replace("|", "").replace("-", "").replace(" ", "")) == set():
+            continue
+        if "|" in cleaned:
+            row = [part.strip() for part in cleaned.split("|")]
+        elif "," in cleaned:
+            row = [part.strip() for part in next(csv.reader([cleaned]))]
+        elif "\t" in cleaned:
+            row = [part.strip() for part in cleaned.split("\t")]
+        else:
+            parts = re.split(r"\s{2,}", cleaned)
+            row = parts if len(parts) > 1 else [cleaned]
+        rows.append(row)
+        if len(rows) >= 500:
+            break
+    return rows
 
 
 def _extract_pdf(path: Path) -> str:
