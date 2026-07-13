@@ -112,6 +112,7 @@ def _suffix_for_mime(mime_type: str) -> str:
         "application/pdf": ".pdf",
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
+        "application/vnd.ms-excel": ".xls",
         "text/csv": ".csv",
         "image/jpeg": ".jpg",
         "image/png": ".png",

@@ -21,6 +21,7 @@ IMAGE_MIME_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
 DOCX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 PDF_MIME_TYPE = "application/pdf"
 XLSX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+XLS_MIME_TYPE = "application/vnd.ms-excel"
 
 
 @dataclass(frozen=True)
@@ -39,6 +40,8 @@ def extract_document_text(path: Path, mime_type: str | None = None) -> str:
         return _extract_docx(path)
     if suffix in {".xlsx", ".xlsm"}:
         return _extract_xlsx(path)
+    if suffix == ".xls" or mime_type == XLS_MIME_TYPE:
+        return _extract_legacy_xls(path)
     if suffix == ".csv" or mime_type == "text/csv":
         return _extract_csv(path)
     if suffix in {".txt", ".md"} or (mime_type and mime_type.startswith("text/")):
@@ -61,19 +64,11 @@ def build_image_content_block(path: Path, mime_type: str) -> dict[str, Any]:
 
 def clean_excel_workbook(source: Path, output_dir: Path, instruction_text: str = "") -> Path:
     """Create a lightly cleaned Excel copy without changing the source file."""
+    source = prepare_excel_source(source, output_dir)
     workbook = load_workbook(str(source))
     heading = _extract_heading(instruction_text, source)
     for sheet in workbook.worksheets:
         _clean_sheet(sheet, heading)
-
-    for sheet in workbook.worksheets:
-        header_row = _find_header_row(sheet)
-        for action in actions:
-            if str(action.get("type", "")).lower().strip() == "add_product_summary":
-                if _add_product_summary(sheet, header_row):
-                    applied.append(f"{sheet.title}: added product summary")
-                else:
-                    skipped.append(f"{sheet.title}: sikuweza kutengeneza product summary")
 
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     output_name = f"{source.stem}-cleaned-{timestamp}.xlsx"
@@ -89,6 +84,7 @@ def edit_excel_workbook(
     plan: dict[str, Any] | None = None,
 ) -> ExcelEditResult:
     """Apply planned Excel edits, then return a formatted copy."""
+    source = prepare_excel_source(source, output_dir)
     workbook = load_workbook(str(source))
     applied: list[str] = []
     skipped: list[str] = []
@@ -155,6 +151,23 @@ def edit_excel_workbook(
     target = output_dir / output_name
     workbook.save(str(target))
     return ExcelEditResult(path=target, applied=applied, skipped=skipped)
+
+
+def prepare_excel_source(source: Path, output_dir: Path) -> Path:
+    """Convert legacy Excel formats into xlsx so the editor can safely write them."""
+    suffix = source.suffix.lower()
+    if suffix != ".xls":
+        return source
+
+    pd = _pandas()
+    sheets = pd.read_excel(source, sheet_name=None, engine="xlrd")
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    target = output_dir / f"{source.stem}-converted-{timestamp}.xlsx"
+    with pd.ExcelWriter(target, engine="openpyxl") as writer:
+        for sheet_name, frame in sheets.items():
+            safe_sheet_name = str(sheet_name)[:31] or "Sheet"
+            frame.to_excel(writer, sheet_name=safe_sheet_name, index=False)
+    return target
 
 
 def excel_workbook_preview(source: Path, max_rows: int = 8) -> str:
@@ -335,11 +348,12 @@ def _is_excel_attachment(attachment: dict[str, Any]) -> bool:
     mime_type = attachment.get("mime_type") or ""
     filename = str(attachment.get("filename") or path.name).lower()
     return (
-        path.suffix.lower() in {".xlsx", ".xlsm"}
-        or filename.endswith((".xlsx", ".xlsm"))
+        path.suffix.lower() in {".xlsx", ".xlsm", ".xls"}
+        or filename.endswith((".xlsx", ".xlsm", ".xls"))
         or mime_type
         in {
             XLSX_MIME_TYPE,
+            XLS_MIME_TYPE,
             "application/vnd.ms-excel.sheet.macroenabled.12",
         }
     )
@@ -874,6 +888,19 @@ def _extract_xlsx(path: Path) -> str:
         workbook.close()
 
 
+def _extract_legacy_xls(path: Path) -> str:
+    pd = _pandas()
+    sheets = pd.read_excel(path, sheet_name=None, engine="xlrd", nrows=200)
+    chunks: list[str] = []
+    for sheet_name, frame in sheets.items():
+        if frame.empty:
+            continue
+        rows = [" | ".join(map(str, frame.columns.tolist()))]
+        rows.extend(" | ".join("" if value is None else str(value) for value in row) for row in frame.fillna("").values.tolist())
+        chunks.append(f"--- Sheet: {sheet_name} ---\n" + "\n".join(rows[:201]))
+    return "\n\n".join(chunks)
+
+
 def _extract_csv(path: Path) -> str:
     rows: list[str] = []
     with path.open("r", encoding="utf-8", errors="replace", newline="") as file:
@@ -884,3 +911,9 @@ def _extract_csv(path: Path) -> str:
                 rows.append("[CSV truncated after 300 rows]")
                 break
     return "\n".join(rows)
+
+
+def _pandas() -> Any:
+    import pandas as pd
+
+    return pd

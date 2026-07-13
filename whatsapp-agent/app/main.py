@@ -10,6 +10,7 @@ from app.config import get_settings
 from app.documents import (
     DOCX_MIME_TYPE,
     PDF_MIME_TYPE,
+    XLS_MIME_TYPE,
     XLSX_MIME_TYPE,
     combined_attachment_text,
     create_docx_report,
@@ -368,11 +369,12 @@ def _is_excel_path_or_mime(attachment: dict[str, Any]) -> bool:
     mime_type = attachment.get("mime_type") or ""
     filename = str(attachment.get("filename") or path.name).lower()
     return (
-        path.suffix.lower() in {".xlsx", ".xlsm"}
-        or filename.endswith((".xlsx", ".xlsm"))
+        path.suffix.lower() in {".xlsx", ".xlsm", ".xls"}
+        or filename.endswith((".xlsx", ".xlsm", ".xls"))
         or mime_type
         in {
             XLSX_MIME_TYPE,
+            XLS_MIME_TYPE,
             "application/vnd.ms-excel.sheet.macroenabled.12",
         }
     )
