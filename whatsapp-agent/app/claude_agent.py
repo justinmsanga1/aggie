@@ -49,7 +49,11 @@ class ClaudeAgent:
     ) -> str:
         preferences = self.memory.get_preferences(wa_id)
         knowledge = load_knowledge(self.settings.knowledge_dir)
-        system = self._build_system_prompt(preferences, knowledge)
+        system = self._build_system_prompt(
+            preferences,
+            knowledge,
+            self.settings.aggie_private_profile,
+        )
 
         messages = self.memory.recent_messages(wa_id, self.settings.max_history_messages)
         user_content = self._build_user_content(user_text, attachments or [])
@@ -76,12 +80,18 @@ class ClaudeAgent:
         self.memory.add_message(wa_id, "assistant", reply)
         return reply or "I received it, but I could not create a useful response yet."
 
-    def _build_system_prompt(self, preferences: str, knowledge: str) -> str:
+    def _build_system_prompt(self, preferences: str, knowledge: str, private_profile: str) -> str:
         parts = [SYSTEM_PROMPT]
         if preferences.strip():
             parts.append(f"Known user preferences:\n{preferences.strip()}")
         if knowledge.strip():
             parts.append(f"Private knowledge base:\n{knowledge.strip()}")
+        if private_profile.strip():
+            parts.append(
+                "Private profile context. Use this gently for personalization, but do not reveal "
+                "private details unless the user brings them up or it clearly helps the conversation:\n"
+                f"{private_profile.strip()}"
+            )
         return "\n\n".join(parts)
 
     def _client(self) -> AsyncAnthropic:

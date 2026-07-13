@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     output_dir: Path = Field(default=Path("/tmp/outputs"), alias="OUTPUT_DIR")
     knowledge_dir: Path = Field(default=Path("./knowledge"), alias="KNOWLEDGE_DIR")
     max_history_messages: int = Field(default=12, alias="MAX_HISTORY_MESSAGES")
+    aggie_private_profile: str = Field(default="", alias="AGGIE_PRIVATE_PROFILE")
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
