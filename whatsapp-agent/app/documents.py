@@ -1,5 +1,6 @@
 import base64
 import csv
+import re
 from copy import copy
 from datetime import datetime
 from pathlib import Path
@@ -45,11 +46,12 @@ def build_image_content_block(path: Path, mime_type: str) -> dict[str, Any]:
     }
 
 
-def clean_excel_workbook(source: Path, output_dir: Path) -> Path:
+def clean_excel_workbook(source: Path, output_dir: Path, instruction_text: str = "") -> Path:
     """Create a lightly cleaned Excel copy without changing the source file."""
     workbook = load_workbook(str(source))
+    heading = _extract_heading(instruction_text, source)
     for sheet in workbook.worksheets:
-        _clean_sheet(sheet)
+        _clean_sheet(sheet, heading)
 
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     output_name = f"{source.stem}-cleaned-{timestamp}.xlsx"
@@ -98,8 +100,11 @@ def _is_excel_attachment(attachment: dict[str, Any]) -> bool:
     )
 
 
-def _clean_sheet(sheet: Any) -> None:
-    sheet.freeze_panes = "A2"
+def _clean_sheet(sheet: Any, heading: str) -> None:
+    _delete_empty_rows(sheet)
+    _delete_empty_columns(sheet)
+    _add_heading(sheet, heading)
+    sheet.freeze_panes = "A3"
 
     for row in sheet.iter_rows():
         for cell in row:
@@ -108,20 +113,59 @@ def _clean_sheet(sheet: Any) -> None:
             cell.font = Font(
                 name=cell.font.name or "Calibri",
                 size=cell.font.sz or 11,
-                bold=cell.row == 1,
+                bold=cell.row in {1, 2},
                 italic=cell.font.italic,
                 color="000000",
             )
 
-    _delete_empty_rows(sheet)
-    _delete_empty_columns(sheet)
     _auto_size_columns(sheet)
 
-    if sheet.max_row >= 1:
-        for cell in sheet[1]:
+    if sheet.max_row >= 2:
+        for cell in sheet[2]:
             cell.font = copy(cell.font)
             cell.font = Font(name=cell.font.name or "Calibri", size=11, bold=True, color="000000")
             cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        sheet.auto_filter.ref = f"A2:{get_column_letter(sheet.max_column)}{sheet.max_row}"
+
+
+def _extract_heading(instruction_text: str, source: Path) -> str:
+    text = " ".join(instruction_text.split())
+    patterns = [
+        r"(?:heading|title|kichwa|header)\s*(?:ya|ni|is|:|-)?\s*['\"]?([^'\"]{3,80})",
+        r"(?:weka|add|put)\s+(?:heading|title|kichwa)\s*(?:ya|as|:|-)?\s*['\"]?([^'\"]{3,80})",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match:
+            return _clean_heading(match.group(1))
+    return _clean_heading(source.stem.replace("_", " ").replace("-", " "))
+
+
+def _clean_heading(value: str) -> str:
+    heading = re.split(r"\b(?:na|and|then|kisha|halafu|please|tafadhali)\b", value, flags=re.IGNORECASE)[0]
+    heading = re.sub(r"\s+", " ", heading).strip(" .:-_")
+    return (heading or "Stock Report").upper()
+
+
+def _add_heading(sheet: Any, heading: str) -> None:
+    if sheet.max_row == 0 or sheet.max_column == 0:
+        return
+    first_row_values = [sheet.cell(1, col_idx).value for col_idx in range(1, sheet.max_column + 1)]
+    already_has_heading = (
+        len([value for value in first_row_values if value not in (None, "")]) == 1
+        and sheet.max_column > 1
+    )
+    if not already_has_heading:
+        sheet.insert_rows(1)
+
+    end_column = max(sheet.max_column, 1)
+    if end_column > 1:
+        sheet.merge_cells(start_row=1, start_column=1, end_row=1, end_column=end_column)
+    cell = sheet.cell(1, 1)
+    cell.value = heading
+    cell.font = Font(name="Calibri", size=15, bold=True, color="000000")
+    cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    sheet.row_dimensions[1].height = 24
 
 
 def _delete_empty_rows(sheet: Any) -> None:

@@ -102,11 +102,15 @@ async def _handle_message(message: dict[str, Any]) -> None:
         excel_attachment = next(
             item for item in attachments if _is_excel_path_or_mime(item)
         )
-        cleaned_file = clean_excel_workbook(Path(excel_attachment["path"]), settings.output_dir)
+        cleaned_file = clean_excel_workbook(
+            Path(excel_attachment["path"]),
+            settings.output_dir,
+            instruction_text=text,
+        )
         await whatsapp.send_document(
             wa_id,
             cleaned_file,
-            caption="Nimekusafishia Excel file. Unaweza ku-download hii version hapa.",
+            caption="Nime-edit Excel file na kuongeza heading/format safi. Unaweza ku-download hii version hapa.",
             mime_type=XLSX_MIME_TYPE,
         )
         memory.add_message(
@@ -116,7 +120,7 @@ async def _handle_message(message: dict[str, Any]) -> None:
         )
         await whatsapp.send_text(
             wa_id,
-            "Done, nimetuma file mpya hapo juu. Nimeondoa styling nzito/rangi, nimepanga columns, na nimeweka sheet iwe rahisi kusoma.",
+            "Done, nimetuma file mpya hapo juu. Nimeweka heading, nimepanga header row, filter, freeze pane, na columns zisomeke vizuri.",
         )
         return
 
