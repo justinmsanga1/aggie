@@ -65,6 +65,7 @@ async def debug_config() -> dict[str, bool | str]:
             (settings.kv_rest_api_url and settings.kv_rest_api_token)
             or (settings.upstash_redis_rest_url and settings.upstash_redis_rest_token)
         ),
+        "blob_store_set": bool(settings.blob_read_write_token),
     }
 
 

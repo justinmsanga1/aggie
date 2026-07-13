@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     kv_rest_api_token: str = Field(default="", alias="KV_REST_API_TOKEN")
     upstash_redis_rest_url: str = Field(default="", alias="UPSTASH_REDIS_REST_URL")
     upstash_redis_rest_token: str = Field(default="", alias="UPSTASH_REDIS_REST_TOKEN")
+    blob_read_write_token: str = Field(default="", alias="BLOB_READ_WRITE_TOKEN")
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
