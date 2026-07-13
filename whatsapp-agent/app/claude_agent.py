@@ -6,7 +6,13 @@ from typing import Any
 from anthropic import AsyncAnthropic
 
 from app.config import Settings
-from app.documents import IMAGE_MIME_TYPES, build_image_content_block, excel_workbook_preview, extract_document_text
+from app.documents import (
+    IMAGE_MIME_TYPES,
+    _actions_from_instruction,
+    build_image_content_block,
+    excel_workbook_preview,
+    extract_document_text,
+)
 from app.knowledge import load_knowledge
 from app.memory import ConversationMemory
 
@@ -146,13 +152,26 @@ Workbook preview:
             block.text for block in response.content if getattr(block, "type", None) == "text"
         ).strip()
         plan = _parse_json_object(raw)
+        deterministic_actions = _actions_from_instruction(user_text)
         if not isinstance(plan, dict):
+            if deterministic_actions:
+                return {
+                    "can_execute": True,
+                    "question": "",
+                    "actions": deterministic_actions,
+                    "summary": "Apply requested Excel edits",
+                }
             return {
                 "can_execute": False,
                 "question": "Sijaelewa vizuri nifanye edit gani kwenye Excel. Niambie nibadilishe nini?",
                 "actions": [],
                 "summary": "",
             }
+        if plan.get("can_execute") is False and deterministic_actions:
+            plan["can_execute"] = True
+            plan["question"] = ""
+            plan["actions"] = deterministic_actions
+            plan["summary"] = plan.get("summary") or "Apply requested Excel edits"
         return plan
 
     def _build_system_prompt(self, preferences: str, knowledge: str, private_profile: str) -> str:

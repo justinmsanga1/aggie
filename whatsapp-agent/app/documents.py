@@ -91,11 +91,7 @@ def edit_excel_workbook(
     applied: list[str] = []
     skipped: list[str] = []
 
-    actions = _normalize_excel_plan_actions(plan)
-    if not actions:
-        requested_columns = _extract_delete_column_requests(instruction_text)
-        if requested_columns:
-            actions.append({"type": "delete_columns", "columns": requested_columns})
+    actions = _actions_from_plan_and_instruction(plan, instruction_text)
 
     for sheet in workbook.worksheets:
         header_row = _find_header_row(sheet)
@@ -152,7 +148,7 @@ def edit_excel_workbook(
     output_name = f"{source.stem}-edited-{timestamp}.xlsx"
     target = output_dir / output_name
     workbook.save(str(target))
-    verification_errors = verify_excel_result(target, plan)
+    verification_errors = verify_excel_result(target, {"actions": actions})
     return ExcelEditResult(
         path=target,
         applied=applied,
@@ -189,6 +185,70 @@ def verify_excel_result(path: Path, plan: dict[str, Any] | None = None) -> list[
     finally:
         workbook.close()
     return errors
+
+
+def _actions_from_plan_and_instruction(
+    plan: dict[str, Any] | None,
+    instruction_text: str,
+) -> list[dict[str, Any]]:
+    actions = _normalize_excel_plan_actions(plan)
+    text_actions = _actions_from_instruction(instruction_text)
+
+    merged: list[dict[str, Any]] = []
+    for action in [*actions, *text_actions]:
+        action_type = str(action.get("type", "")).lower().strip()
+        if action_type == "delete_columns":
+            columns = _string_list(action.get("columns"))
+            existing = next(
+                (
+                    item
+                    for item in merged
+                    if str(item.get("type", "")).lower().strip() == "delete_columns"
+                ),
+                None,
+            )
+            if existing is not None:
+                existing["columns"] = _unique_preserve_order(
+                    _string_list(existing.get("columns")) + columns
+                )
+            elif columns:
+                merged.append({"type": "delete_columns", "columns": columns})
+            continue
+
+        if action_type and not any(
+            str(item.get("type", "")).lower().strip() == action_type for item in merged
+        ):
+            merged.append(action)
+    return merged
+
+
+def _actions_from_instruction(text: str) -> list[dict[str, Any]]:
+    lowered = text.lower()
+    actions: list[dict[str, Any]] = []
+    delete_columns = _extract_delete_column_requests(text)
+
+    if any(word in lowered for word in ["simu", "phone", "mobile", "namba", "contact"]):
+        delete_columns.append("simu")
+    if any(word in lowered for word in ["quantity", "quantiti", "qty", "qnty", "idadi", "pcs"]):
+        delete_columns.append("quantity")
+    if delete_columns:
+        actions.append({"type": "delete_columns", "columns": _unique_preserve_order(delete_columns)})
+
+    wants_summary = any(
+        phrase in lowered
+        for phrase in [
+            "product summary",
+            "summary chini",
+            "summary iko chini",
+            "item summary",
+            "summary ya product",
+            "muhtasari wa bidhaa",
+        ]
+    )
+    if wants_summary:
+        actions.append({"type": "add_product_summary"})
+
+    return actions
 
 
 def prepare_excel_source(source: Path, output_dir: Path) -> Path:
@@ -448,6 +508,25 @@ def _extract_delete_column_requests(text: str) -> list[str]:
                 cleaned = part.strip(" '\"`:-")
                 if cleaned and cleaned.lower() not in {"the", "column", "columns", "safu"}:
                     values.append(cleaned)
+    column_mentions = re.findall(
+        r"([a-zA-Z0-9 _-]{2,40}?)\s+(?:column|columns|col|safu)\b",
+        text,
+        flags=re.IGNORECASE,
+    )
+    for mention in column_mentions:
+        cleaned = re.sub(
+            r"^(?:hyo|hiyo|ile|the|ya|yenye|called|named)\s+",
+            "",
+            mention.strip(" '\"`:-"),
+            flags=re.IGNORECASE,
+        )
+        cleaned = re.split(
+            r"\b(?:delete|remove|drop|futa|ondoa|toa|and|na)\b",
+            cleaned,
+            flags=re.IGNORECASE,
+        )[-1].strip(" '\"`:-")
+        if cleaned and cleaned.lower() not in {"the", "column", "columns", "safu"}:
+            values.append(cleaned)
     return _unique_preserve_order(values)
 
 
@@ -650,7 +729,37 @@ def _find_product_column(sheet: Any, header_row: int) -> int | None:
         col_idx = _match_column(sheet, header_row, name)
         if col_idx:
             return col_idx
+    semantic_col = _find_product_like_column(sheet, header_row)
+    if semantic_col:
+        return semantic_col
     return None
+
+
+def _find_product_like_column(sheet: Any, header_row: int) -> int | None:
+    best: tuple[int, int] | None = None
+    for col_idx in range(1, sheet.max_column + 1):
+        values: list[str] = []
+        for row_idx in range(header_row, min(sheet.max_row, header_row + 120) + 1):
+            value = sheet.cell(row_idx, col_idx).value
+            if value in (None, ""):
+                continue
+            text = str(value).strip()
+            if not text or _looks_like_phone_value(text) or _looks_like_date_value(text):
+                continue
+            if re.fullmatch(r"(?:DO|INV|PO)?\d{2,}[-/\w]*", text, flags=re.IGNORECASE):
+                continue
+            if _to_number(text) is not None:
+                continue
+            values.append(text.upper())
+        if len(values) < 2:
+            continue
+        unique_count = len(set(values))
+        repeat_count = len(values) - unique_count
+        average_len = sum(len(value) for value in values) / len(values)
+        score = repeat_count * 4 + min(unique_count, 20) + int(average_len >= 6)
+        if best is None or score > best[0]:
+            best = (score, col_idx)
+    return best[1] if best and best[0] >= 8 else None
 
 
 def _find_numeric_columns(sheet: Any, header_row: int, exclude: set[int]) -> list[int]:
@@ -773,6 +882,14 @@ def _looks_like_phone_value(value: Any) -> bool:
     if len(text) < 7 or len(text) > 15:
         return False
     return text.startswith(("0", "255", "254", "256", "1", "7"))
+
+
+def _looks_like_date_value(value: Any) -> bool:
+    text = str(value).strip()
+    return bool(
+        re.fullmatch(r"\d{1,2}/\d{1,2}/\d{2,4}(?:\s+\d{1,2}:\d{2})?", text)
+        or re.fullmatch(r"\d{4}-\d{1,2}-\d{1,2}(?:\s+\d{1,2}:\d{2}:\d{2})?", text)
+    )
 
 
 def _normalize_header(value: str) -> str:
