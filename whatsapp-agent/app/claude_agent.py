@@ -75,9 +75,9 @@ class ClaudeAgent:
         )
 
         messages = self.memory.recent_messages(wa_id, self.settings.max_history_messages)
-        messages = _fix_consecutive_roles(messages)
         user_content = self._build_user_content(user_text, attachments or [])
         messages.append({"role": "user", "content": user_content})
+        messages = _fix_consecutive_roles(messages)
 
         if not self.settings.anthropic_api_key:
             return (

@@ -766,7 +766,7 @@ def _looks_like_file_action(text: str) -> bool:
             "convert", "organize", "andaa", "prepare",
         ]
     )
-    return has_file_ref and has_action
+    return has_file_ref or has_action
 
 
 def _looks_like_confirmation(text: str) -> bool:
