@@ -1,5 +1,6 @@
 import sqlite3
 import json
+import logging
 import os
 import uuid
 from pathlib import Path
@@ -8,6 +9,8 @@ from typing import Any
 import httpx
 
 from app import blob_store
+
+logger = logging.getLogger("whatsapp-agent")
 
 
 class ConversationMemory:
@@ -19,7 +22,31 @@ class ConversationMemory:
         return sqlite3.connect(self.database_path)
 
     def _init_db(self) -> None:
-        with self._connect() as conn:
+        try:
+            self._create_tables(self._connect())
+        except sqlite3.DatabaseError:
+            logger.warning("SQLite database corrupted, recreating: %s", self.database_path)
+            self._recreate_database()
+
+    def _recreate_database(self) -> None:
+        try:
+            self.database_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        try:
+            wal_path = self.database_path.with_suffix(".sqlite3-wal")
+            wal_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        try:
+            shm_path = self.database_path.with_suffix(".sqlite3-shm")
+            shm_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        self._create_tables(self._connect())
+
+    def _create_tables(self, conn: sqlite3.Connection) -> None:
+        with conn:
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS messages (
@@ -96,12 +123,17 @@ class ConversationMemory:
     def is_message_processed(self, message_id: str) -> bool:
         if _get_persistent(f"processed_msg:{message_id}"):
             return True
-        with self._connect() as conn:
-            row = conn.execute(
-                "SELECT 1 FROM processed_messages WHERE message_id = ?",
-                (message_id,),
-            ).fetchone()
-        return row is not None
+        try:
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT 1 FROM processed_messages WHERE message_id = ?",
+                    (message_id,),
+                ).fetchone()
+            return row is not None
+        except sqlite3.DatabaseError:
+            logger.warning("DB read failed in is_message_processed, recreating database")
+            self._recreate_database()
+            return False
 
     def mark_message_processed(self, message_id: str) -> None:
         _set_persistent(
@@ -109,35 +141,47 @@ class ConversationMemory:
             {"message_id": message_id},
             ttl_seconds=604800,
         )
-        with self._connect() as conn:
-            conn.execute(
-                "INSERT OR IGNORE INTO processed_messages (message_id) VALUES (?)",
-                (message_id,),
-            )
+        try:
+            with self._connect() as conn:
+                conn.execute(
+                    "INSERT OR IGNORE INTO processed_messages (message_id) VALUES (?)",
+                    (message_id,),
+                )
+        except sqlite3.DatabaseError:
+            logger.warning("DB write failed in mark_message_processed, recreating database")
+            self._recreate_database()
 
     def add_message(self, wa_id: str, role: str, content: str) -> None:
         content = content.strip()
         if not content:
             return
-        with self._connect() as conn:
-            conn.execute(
-                "INSERT INTO messages (wa_id, role, content) VALUES (?, ?, ?)",
-                (wa_id, role, content[:12000]),
-            )
+        try:
+            with self._connect() as conn:
+                conn.execute(
+                    "INSERT INTO messages (wa_id, role, content) VALUES (?, ?, ?)",
+                    (wa_id, role, content[:12000]),
+                )
+        except sqlite3.DatabaseError:
+            logger.warning("DB write failed in add_message, recreating database")
+            self._recreate_database()
 
     def recent_messages(self, wa_id: str, limit: int) -> list[dict[str, str]]:
-        with self._connect() as conn:
-            rows = conn.execute(
-                """
-                SELECT role, content FROM messages
-                WHERE wa_id = ?
-                ORDER BY id DESC
-                LIMIT ?
-                """,
-                (wa_id, limit),
-            ).fetchall()
-
-        return [{"role": role, "content": content} for role, content in reversed(rows)]
+        try:
+            with self._connect() as conn:
+                rows = conn.execute(
+                    """
+                    SELECT role, content FROM messages
+                    WHERE wa_id = ?
+                    ORDER BY id DESC
+                    LIMIT ?
+                    """,
+                    (wa_id, limit),
+                ).fetchall()
+            return [{"role": role, "content": content} for role, content in reversed(rows)]
+        except sqlite3.DatabaseError:
+            logger.warning("DB read failed in recent_messages, recreating database")
+            self._recreate_database()
+            return []
 
     def last_user_message(self, wa_id: str) -> str:
         with self._connect() as conn:

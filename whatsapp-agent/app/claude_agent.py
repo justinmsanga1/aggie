@@ -101,7 +101,8 @@ class ClaudeAgent:
         ).strip()
 
         self.memory.add_message(wa_id, "user", user_text or self._attachment_summary(attachments or []))
-        self.memory.add_message(wa_id, "assistant", reply)
+        if reply:
+            self.memory.add_message(wa_id, "assistant", reply)
         return reply or "I received it, but I could not create a useful response yet."
 
     async def plan_excel_edits(
@@ -328,6 +329,8 @@ def _fix_consecutive_roles(messages: list[dict[str, Any]]) -> list[dict[str, Any
             fixed[-1] = msg
         else:
             fixed.append(msg)
+    if fixed and fixed[0]["role"] == "assistant":
+        fixed = fixed[1:]
     return fixed
 
 

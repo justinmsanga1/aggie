@@ -97,16 +97,24 @@ async def receive_webhook(request: Request) -> dict[str, str]:
         return {"status": "error"}
     for message in _iter_messages(payload):
         message_id = message.get("id", "")
-        if message_id and memory.is_message_processed(message_id):
+        try:
+            is_duplicate = message_id and memory.is_message_processed(message_id)
+        except Exception:
+            logger.warning("Failed to check processed status for %s, treating as new", message_id)
+            is_duplicate = False
+        if is_duplicate:
             logger.info("Skipping duplicate message %s", message_id)
             continue
+        if message_id:
+            try:
+                memory.mark_message_processed(message_id)
+            except Exception:
+                logger.warning("Failed to mark message %s as processed (pre-handling)", message_id)
         try:
             await _handle_message(message)
         except Exception:
             logger.exception("Failed to handle WhatsApp message")
             continue
-        if message_id:
-            memory.mark_message_processed(message_id)
     return {"status": "received"}
 
 
