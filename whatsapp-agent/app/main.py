@@ -422,6 +422,54 @@ async def _handle_excel_attachment(
     await whatsapp.send_text(wa_id, "Nimeipata Excel. Naifanyia kazi sasa...")
     logger.info("Excel edit started for %s with file %s", wa_id, excel_attachment.get("filename"))
     try:
+        if _wants_pdf(instruction_text):
+            analysis_text = await agent.answer(
+                wa_id=wa_id,
+                user_text=(
+                    "Analyze this Excel spreadsheet and return ALL its data as a clean report. "
+                    "Include every column header and every row of data. "
+                    "Organize into clear sections with tables. "
+                    "Return only the report content, no explanation.\n\n"
+                    f"User instruction: {instruction_text}"
+                ),
+                attachments=[excel_attachment],
+            )
+            report_file = create_pdf_report(analysis_text, settings.output_dir, _report_title(instruction_text))
+            await whatsapp.send_document(
+                wa_id,
+                report_file,
+                caption="Nimeconvert Excel kuwa PDF. Unaweza ku-download hapa.",
+                mime_type=PDF_MIME_TYPE,
+            )
+            await whatsapp.send_text(wa_id, "Done, nimetuma PDF file hapo juu.")
+            memory.clear_pending_file(wa_id)
+            memory.clear_pending_instruction(wa_id)
+            return True
+
+        if _wants_word(instruction_text):
+            analysis_text = await agent.answer(
+                wa_id=wa_id,
+                user_text=(
+                    "Analyze this Excel spreadsheet and return ALL its data as a clean Word report. "
+                    "Include every column header and every row of data. "
+                    "Organize into clear sections with tables. "
+                    "Return only the report content, no explanation.\n\n"
+                    f"User instruction: {instruction_text}"
+                ),
+                attachments=[excel_attachment],
+            )
+            report_file = create_docx_report(analysis_text, settings.output_dir, _report_title(instruction_text))
+            await whatsapp.send_document(
+                wa_id,
+                report_file,
+                caption="Nimeconvert Excel kuwa Word. Unaweza ku-download hapa.",
+                mime_type=DOCX_MIME_TYPE,
+            )
+            await whatsapp.send_text(wa_id, "Done, nimetuma Word file hapo juu.")
+            memory.clear_pending_file(wa_id)
+            memory.clear_pending_instruction(wa_id)
+            return True
+
         if job:
             job = memory.update_document_job(
                 job,
@@ -686,7 +734,7 @@ def _looks_like_file_action(text: str) -> bool:
         return False
     has_file_ref = any(
         word in lowered
-        for word in ["excel", "xlsx", "xls", "spreadsheet", "workbook", "file"]
+        for word in ["excel", "xlsx", "xls", "spreadsheet", "workbook", "file", "pdf", "word", "docx"]
     )
     has_action = any(
         word in lowered
