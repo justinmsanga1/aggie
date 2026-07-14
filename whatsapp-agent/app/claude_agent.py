@@ -185,6 +185,51 @@ Workbook preview:
             plan["summary"] = plan.get("summary") or "Apply requested Excel edits"
         return plan
 
+    async def extract_data_from_image(
+        self,
+        image_path: Path,
+        mime_type: str,
+        instruction: str = "",
+    ) -> str:
+        if not self.settings.anthropic_api_key:
+            return ""
+
+        system = (
+            "You extract structured data from images of documents, tables, receipts, "
+            "invoices, stock lists, handwritten notes, or any data-containing image. "
+            "Return ONLY the data you can see, organized clearly in markdown table format. "
+            "Do not explain, do not add commentary, just return the extracted data."
+        )
+
+        content: list[dict[str, Any]] = [
+            {
+                "type": "text",
+                "text": (
+                    "Extract ALL data from this image into a clean markdown table. "
+                    "Include every row and column you can see. "
+                    "Use '—' for empty or unclear cells. "
+                    "If it is a table, preserve the exact structure. "
+                    "If it is a list or form, organize it into rows and columns.\n"
+                    + (f"User instruction: {instruction}" if instruction else "")
+                ),
+            },
+            build_image_content_block(image_path, mime_type),
+        ]
+
+        try:
+            response = await self._client().messages.create(
+                model=self.settings.claude_model,
+                max_tokens=4000,
+                system=system,
+                messages=[{"role": "user", "content": content}],
+            )
+            return "".join(
+                block.text for block in response.content if getattr(block, "type", None) == "text"
+            ).strip()
+        except Exception:
+            logger.exception("Image data extraction failed")
+            return ""
+
     def _build_system_prompt(self, preferences: str, knowledge: str, private_profile: str) -> str:
         parts = [SYSTEM_PROMPT]
         if preferences.strip():

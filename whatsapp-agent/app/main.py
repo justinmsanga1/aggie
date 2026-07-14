@@ -10,6 +10,7 @@ from app import blob_store
 from app.config import get_settings
 from app.documents import (
     DOCX_MIME_TYPE,
+    IMAGE_MIME_TYPES,
     PDF_MIME_TYPE,
     XLS_MIME_TYPE,
     XLSX_MIME_TYPE,
@@ -328,6 +329,18 @@ async def _handle_message(message: dict[str, Any]) -> None:
 
     if attachments and _wants_excel_output(text) and not has_excel_attachment(attachments):
         source_text = combined_attachment_text(attachments)
+        if not source_text:
+            image_attachment = next(
+                (a for a in attachments if (a.get("mime_type") or "") in IMAGE_MIME_TYPES),
+                None,
+            )
+            if image_attachment:
+                await whatsapp.send_text(wa_id, "Na extract data kutoka kwenye picha...")
+                source_text = await agent.extract_data_from_image(
+                    Path(image_attachment["path"]),
+                    str(image_attachment.get("mime_type") or "image/jpeg"),
+                    instruction=text,
+                )
         if source_text:
             excel_file = create_excel_from_text(source_text, settings.output_dir, _report_title(text))
             await whatsapp.send_document(
@@ -375,10 +388,17 @@ async def _handle_excel_attachment(
 ) -> bool:
     if not has_excel_attachment(attachments):
         if attachments and _looks_like_excel_action(text):
-            attachments[0]["filename"] = _ensure_xlsx_filename(
-                str(attachments[0].get("filename") or Path(attachments[0]["path"]).name)
+            non_image = next(
+                (a for a in attachments if (a.get("mime_type") or "") not in IMAGE_MIME_TYPES),
+                None,
             )
-            attachments[0]["mime_type"] = XLSX_MIME_TYPE
+            if non_image:
+                non_image["filename"] = _ensure_xlsx_filename(
+                    str(non_image.get("filename") or Path(non_image["path"]).name)
+                )
+                non_image["mime_type"] = XLSX_MIME_TYPE
+            else:
+                return False
         else:
             return False
 
