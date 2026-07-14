@@ -90,7 +90,11 @@ async def verify_webhook(
 
 @app.post("/webhook")
 async def receive_webhook(request: Request) -> dict[str, str]:
-    payload = await request.json()
+    try:
+        payload = await request.json()
+    except Exception:
+        logger.exception("Failed to parse webhook payload")
+        return {"status": "error"}
     for message in _iter_messages(payload):
         message_id = message.get("id", "")
         if message_id and memory.is_message_processed(message_id):
@@ -107,7 +111,10 @@ async def receive_webhook(request: Request) -> dict[str, str]:
 
 
 async def _handle_message(message: dict[str, Any]) -> None:
-    wa_id = message["from"]
+    wa_id = message.get("from", "")
+    if not wa_id:
+        logger.warning("Received message without 'from' field, skipping")
+        return
     message_type = message.get("type")
     text = _extract_text(message)
     attachments: list[dict[str, Any]] = []
@@ -230,6 +237,8 @@ async def _handle_message(message: dict[str, Any]) -> None:
                 mime_type=XLSX_MIME_TYPE,
             )
         await whatsapp.send_text(wa_id, "Done, nimelinganisha documents na nimetuma file hapo juu.")
+        memory.clear_pending_file(wa_id)
+        memory.clear_pending_instruction(wa_id)
         return
 
     if await _handle_excel_attachment(wa_id, text, attachments):
@@ -295,6 +304,8 @@ async def _handle_message(message: dict[str, Any]) -> None:
             wa_id,
             "Done. Nimechambua document, nimeextract key fields/line items, na nimekuwekea file hapo juu.",
         )
+        memory.clear_pending_file(wa_id)
+        memory.clear_pending_instruction(wa_id)
         return
 
     if attachments and _wants_report_file(text):
@@ -325,6 +336,8 @@ async def _handle_message(message: dict[str, Any]) -> None:
                 mime_type=DOCX_MIME_TYPE,
             )
         await whatsapp.send_text(wa_id, "Done, nimetuma report file hapo juu.")
+        memory.clear_pending_file(wa_id)
+        memory.clear_pending_instruction(wa_id)
         return
 
     if attachments and _wants_excel_output(text) and not has_excel_attachment(attachments):
@@ -350,6 +363,8 @@ async def _handle_message(message: dict[str, Any]) -> None:
                 mime_type=XLSX_MIME_TYPE,
             )
             await whatsapp.send_text(wa_id, "Done, nimeconvert/organize data kuwa Excel.")
+            memory.clear_pending_file(wa_id)
+            memory.clear_pending_instruction(wa_id)
             return
 
     if attachments and _wants_word_cleanup(text):
@@ -367,13 +382,14 @@ async def _handle_message(message: dict[str, Any]) -> None:
                 mime_type=DOCX_MIME_TYPE,
             )
             await whatsapp.send_text(wa_id, "Done, nimetuma Word document mpya hapo juu.")
+            memory.clear_pending_file(wa_id)
+            memory.clear_pending_instruction(wa_id)
             return
 
-    if _looks_like_missing_file_followup(text):
+    if not attachments and _looks_like_missing_file_followup(text):
         await whatsapp.send_text(
             wa_id,
-            "Pole, nitumie ile Excel file tena hapa na nita-clean kisha nirudishe kama downloadable file. "
-            "Vercel haihifadhi file ya zamani kwa muda mrefu, so nahitaji attachment tena.",
+            "Pole, file ya zamani ime-expire. Tafadhali tuma file tena pamoja na instruction.",
         )
         return
 
@@ -747,9 +763,10 @@ def _looks_like_file_action(text: str) -> bool:
             "total", "jumla", "chini",
             "edit", "hariri", "tengeneza",
             "polish", "keep", "rename", "badilisha",
+            "convert", "organize", "andaa", "prepare",
         ]
     )
-    return has_file_ref or has_action
+    return has_file_ref and has_action
 
 
 def _looks_like_confirmation(text: str) -> bool:

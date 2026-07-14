@@ -379,12 +379,15 @@ def create_pdf_report(content: str, output_dir: Path, title: str = "Aggie Report
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     target = output_dir / f"aggie-report-{timestamp}.pdf"
     styles = getSampleStyleSheet()
-    story: list[Any] = [Paragraph(title, styles["Title"]), Spacer(1, 12)]
+    safe_title = title.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    story: list[Any] = [Paragraph(safe_title, styles["Title"]), Spacer(1, 12)]
     for block in _split_blocks(content):
         if block.startswith("# "):
-            story.append(Paragraph(block[2:].strip(), styles["Heading1"]))
+            heading_text = block[2:].strip().replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            story.append(Paragraph(heading_text, styles["Heading1"]))
         elif block.startswith("## "):
-            story.append(Paragraph(block[3:].strip(), styles["Heading2"]))
+            heading_text = block[3:].strip().replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            story.append(Paragraph(heading_text, styles["Heading2"]))
         else:
             safe = block.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
             story.append(Paragraph(safe.replace("\n", "<br/>"), styles["BodyText"]))
@@ -1153,24 +1156,30 @@ def _text_to_rows(content: str) -> list[list[str]]:
 
 
 def _extract_pdf(path: Path) -> str:
-    reader = PdfReader(str(path))
-    pages: list[str] = []
-    for index, page in enumerate(reader.pages, start=1):
-        text = page.extract_text() or ""
-        if text.strip():
-            pages.append(f"--- Page {index} ---\n{text.strip()}")
-    return "\n\n".join(pages)
+    try:
+        reader = PdfReader(str(path))
+        pages: list[str] = []
+        for index, page in enumerate(reader.pages, start=1):
+            text = page.extract_text() or ""
+            if text.strip():
+                pages.append(f"--- Page {index} ---\n{text.strip()}")
+        return "\n\n".join(pages)
+    except Exception:
+        return ""
 
 
 def _extract_docx(path: Path) -> str:
-    doc = Document(str(path))
-    lines: list[str] = [p.text for p in doc.paragraphs if p.text.strip()]
-    for table in doc.tables:
-        for row in table.rows:
-            cells = [cell.text.strip().replace("\n", " ") for cell in row.cells]
-            if any(cells):
-                lines.append(" | ".join(cells))
-    return "\n".join(lines)
+    try:
+        doc = Document(str(path))
+        lines: list[str] = [p.text for p in doc.paragraphs if p.text.strip()]
+        for table in doc.tables:
+            for row in table.rows:
+                cells = [cell.text.strip().replace("\n", " ") for cell in row.cells]
+                if any(cells):
+                    lines.append(" | ".join(cells))
+        return "\n".join(lines)
+    except Exception:
+        return ""
 
 
 def _extract_xlsx(path: Path) -> str:

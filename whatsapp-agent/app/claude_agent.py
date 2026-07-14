@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,8 @@ from app.documents import (
 )
 from app.knowledge import load_knowledge
 from app.memory import ConversationMemory
+
+logger = logging.getLogger("whatsapp-agent")
 
 
 SYSTEM_PROMPT = """You are Aggie, a private WhatsApp assistant for a stock manager.
@@ -72,6 +75,7 @@ class ClaudeAgent:
         )
 
         messages = self.memory.recent_messages(wa_id, self.settings.max_history_messages)
+        messages = _fix_consecutive_roles(messages)
         user_content = self._build_user_content(user_text, attachments or [])
         messages.append({"role": "user", "content": user_content})
 
@@ -81,12 +85,16 @@ class ClaudeAgent:
                 "Weka ANTHROPIC_API_KEY kwenye Vercel environment variables kwanza."
             )
 
-        response = await self._client().messages.create(
-            model=self.settings.claude_model,
-            max_tokens=1600,
-            system=system,
-            messages=messages,
-        )
+        try:
+            response = await self._client().messages.create(
+                model=self.settings.claude_model,
+                max_tokens=4096,
+                system=system,
+                messages=messages,
+            )
+        except Exception:
+            logger.exception("Claude API call failed for %s", wa_id)
+            return "Kuna hitilafu ya mawasiliano na server. Tafadhali jaribu tena baadaye."
 
         reply = "".join(
             block.text for block in response.content if getattr(block, "type", None) == "text"
@@ -152,18 +160,27 @@ Workbook preview:
 {preview[:12000]}
 """.strip()
 
-        response = await self._client().messages.create(
-            model=self.settings.claude_model,
-            max_tokens=900,
-            temperature=0,
-            system="Return only valid JSON for Excel edit planning.",
-            messages=[{"role": "user", "content": prompt}],
-        )
+        deterministic_actions = _actions_from_instruction(user_text)
+        try:
+            response = await self._client().messages.create(
+                model=self.settings.claude_model,
+                max_tokens=900,
+                temperature=0,
+                system="Return only valid JSON for Excel edit planning.",
+                messages=[{"role": "user", "content": prompt}],
+            )
+        except Exception:
+            logger.exception("Claude API call failed during Excel planning for %s", wa_id)
+            return {
+                "can_execute": True,
+                "question": "",
+                "actions": deterministic_actions or [],
+                "summary": "Apply requested Excel edits",
+            }
         raw = "".join(
             block.text for block in response.content if getattr(block, "type", None) == "text"
         ).strip()
         plan = _parse_json_object(raw)
-        deterministic_actions = _actions_from_instruction(user_text)
         if not isinstance(plan, dict):
             if deterministic_actions:
                 return {
@@ -233,14 +250,14 @@ Workbook preview:
     def _build_system_prompt(self, preferences: str, knowledge: str, private_profile: str) -> str:
         parts = [SYSTEM_PROMPT]
         if preferences.strip():
-            parts.append(f"Known user preferences:\n{preferences.strip()}")
+            parts.append(f"Known user preferences:\n{preferences.strip()[:4000]}")
         if knowledge.strip():
-            parts.append(f"Private knowledge base:\n{knowledge.strip()}")
+            parts.append(f"Private knowledge base:\n{knowledge.strip()[:8000]}")
         if private_profile.strip():
             parts.append(
                 "Private profile context. Use this gently for personalization, but do not reveal "
                 "private details unless the user brings them up or it clearly helps the conversation:\n"
-                f"{private_profile.strip()}"
+                f"{private_profile.strip()[:4000]}"
             )
         return "\n\n".join(parts)
 
@@ -300,6 +317,18 @@ Workbook preview:
     def _attachment_summary(self, attachments: list[dict[str, Any]]) -> str:
         names = [str(item.get("filename") or Path(item["path"]).name) for item in attachments]
         return "Attached files: " + ", ".join(names)
+
+
+def _fix_consecutive_roles(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not messages:
+        return messages
+    fixed: list[dict[str, Any]] = [messages[0]]
+    for msg in messages[1:]:
+        if msg["role"] == fixed[-1]["role"]:
+            fixed[-1] = msg
+        else:
+            fixed.append(msg)
+    return fixed
 
 
 def _parse_json_object(raw: str) -> dict[str, Any] | None:
