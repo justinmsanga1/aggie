@@ -120,7 +120,9 @@ class PsnStore:
         if not console:
             raise ValueError("Console inahitajika: PS4 au PS5.")
         if price <= 0:
-            raise ValueError("Sale price lazima iwe kubwa kuliko 0.")
+            price = default_slot_price(account, console)
+        if price <= 0:
+            raise ValueError("Sale price haijapatikana. Hakikisha account ina buying price.")
 
         matching_game_ids = {g["id"] for g in account.get("games", [])}
         if game["id"] not in matching_game_ids:
@@ -360,9 +362,11 @@ def _choose_slot(slots: list[dict[str, Any]], console: str, requested: Any = Non
                 return sorted(numbered, key=lambda s: int(s.get("reset_cycle") or 0))[0]
         except (TypeError, ValueError):
             pass
-    normal = [s for s in candidates if s.get("slot_type") == "normal"]
+    normal = [s for s in candidates if s.get("slot_type") == "normal" and _slot_number(s) in {1, 2}]
     if normal:
-        return sorted(normal, key=lambda s: int(s.get("slot_number") or 0))[0]
+        return sorted(normal, key=_slot_number)[0]
+    if str(requested).strip().lower() not in {"reset", "3"}:
+        return None
     reset = [s for s in candidates if s.get("slot_type") == "reset"]
     if reset:
         return sorted(reset, key=lambda s: int(s.get("reset_cycle") or 0))[0]
@@ -385,6 +389,25 @@ def _money(value: Any) -> float:
         return 0.0
 
 
+def _slot_number(slot: dict[str, Any]) -> int:
+    try:
+        return int(slot.get("slot_number") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def default_slot_price(account: dict[str, Any], console: str) -> float:
+    buying_price = _money(account.get("purchase_cost"))
+    if buying_price <= 0:
+        return 0.0
+    base = buying_price / 2
+    if console == "ps5":
+        return base + 10000
+    if console == "ps4":
+        return base
+    return 0.0
+
+
 def _clean(value: Any) -> str:
     return str(value or "").strip()
 
@@ -397,4 +420,3 @@ def _plus_six_months() -> str:
     from datetime import timedelta
 
     return (date.today() + timedelta(days=183)).isoformat()
-

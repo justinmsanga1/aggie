@@ -74,7 +74,8 @@ LIVE BUSINESS DATA JSON:
 BUSINESS RULES:
 - The system tracks PSN accounts, games, PS4/PS5 slots, money, and reset/deactivation cycles.
 - Selling starts from the game the customer wants.
-- For selling a slot, required info is: game, console PS4/PS5, sale price. Account/email is required only if multiple matching accounts are possible.
+- Slot price is calculated from account buying price: PS4 = buying price / 2. PS5 = buying price / 2 + 10,000 TZS.
+- For selling a normal slot, required info is: game and console PS4/PS5. Sale price can be auto-calculated from the account buying price. Account/email is required only if multiple matching accounts are possible.
 - Suggest normal slots first. Use reset slots only when no normal slot is available.
 - If reset slot is locked or no slot is available, say so clearly.
 {role_rules}
@@ -104,11 +105,11 @@ def _admin_response_shapes() -> str:
 {"type":"gathering","text":"short question","field":"field_name"}
 
 3. Write action requiring WhatsApp confirmation:
-{"type":"action","action":"sell_slot","params":{"game":"FIFA 25","console":"PS5","email":"account@example.com","price":30000,"customer":"optional"},"confirm":"Confirm kuuza FIFA 25 PS5 kwa account@example.com kwa TZS 30,000?"}
+{"type":"action","action":"sell_slot","params":{"game":"FIFA 25","console":"PS5","email":"account@example.com","customer":"optional"},"confirm":"Confirm kuuza FIFA 25 PS5 kwa account@example.com kwa auto price?"}
 
 SUPPORTED ACTIONS:
 - add_account params: email, password, region, games array, purchase_cost, notes
-- sell_slot params: game, console, email/account_id if known, price, customer, note
+- sell_slot params: game, console, email/account_id if known, optional price, customer, note
 - update_account params: email/account_id, fields object
 - delete_account params: email/account_id
 - mark_deactivated params: email/account_id
@@ -131,8 +132,8 @@ def _customer_rules() -> str:
 - Never reveal account emails, passwords, purchase costs, PSN deposits, profit, internal notes, reset-cycle details, or supplier/admin data.
 - Do not output action JSON in customer mode. Only answer or ask one sales question.
 - Help the customer choose a game and console. Ask PS4 or PS5 when unclear.
-- If a game exists with available slots, say it is available and mention 1-3 available packages that include that game.
-- A package is a safe public bundle from one account: show package label, games included, and PS4/PS5 availability. Never show account email or internal account id.
+- If a game exists with available slots, say it is available and mention 1-3 available packages that include that game, including public PS4/PS5 prices when available.
+- A package is a safe public bundle from one account: show package label, games included, PS4/PS5 availability, and prices. Never show account email or internal account id.
 - When customer asks "do you have X", scan packages for packages whose games include X or close spelling matches. Prefer packages with the requested console available.
 - If several packages include the game, present the best 2-3 in short lines, then ask which one they want.
 - If unavailable, politely offer alternatives from the game list.
@@ -185,13 +186,28 @@ def _customer_inventory(inventory: dict[str, Any]) -> dict[str, Any]:
     for index, account in enumerate(inventory.get("accounts", []), start=1):
         account_games = [g.get("name") for g in account.get("games", []) if g.get("name")]
         available = {
-            "ps4": any(s.get("console") == "ps4" and s.get("status") == "available" for s in account.get("slots", [])),
-            "ps5": any(s.get("console") == "ps5" and s.get("status") == "available" for s in account.get("slots", [])),
+            "ps4": any(_is_primary_available(s, "ps4") for s in account.get("slots", [])),
+            "ps5": any(_is_primary_available(s, "ps5") for s in account.get("slots", [])),
         }
+        ps4_price = _default_slot_price(account, "ps4")
+        ps5_price = _default_slot_price(account, "ps5")
         for game_name in account_games:
-            item = games.setdefault(game_name, {"name": game_name, "ps4_available": False, "ps5_available": False})
+            item = games.setdefault(
+                game_name,
+                {
+                    "name": game_name,
+                    "ps4_available": False,
+                    "ps5_available": False,
+                    "ps4_price": None,
+                    "ps5_price": None,
+                },
+            )
             item["ps4_available"] = item["ps4_available"] or available["ps4"]
             item["ps5_available"] = item["ps5_available"] or available["ps5"]
+            if available["ps4"] and not item["ps4_price"]:
+                item["ps4_price"] = ps4_price
+            if available["ps5"] and not item["ps5_price"]:
+                item["ps5_price"] = ps5_price
         if account_games and (available["ps4"] or available["ps5"]):
             packages.append(
                 {
@@ -199,12 +215,43 @@ def _customer_inventory(inventory: dict[str, Any]) -> dict[str, Any]:
                     "games": account_games[:8],
                     "ps4_available": available["ps4"],
                     "ps5_available": available["ps5"],
+                    "ps4_price": ps4_price if available["ps4"] else None,
+                    "ps5_price": ps5_price if available["ps5"] else None,
                 }
             )
     return {
         "games": sorted(games.values(), key=lambda item: item["name"])[:120],
         "packages": packages[:80],
     }
+
+
+def _is_primary_available(slot: dict[str, Any], console: str) -> bool:
+    return (
+        slot.get("console") == console
+        and slot.get("status") == "available"
+        and slot.get("slot_type") == "normal"
+        and _slot_number(slot) in {1, 2}
+    )
+
+
+def _slot_number(slot: dict[str, Any]) -> int:
+    try:
+        return int(slot.get("slot_number") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _default_slot_price(account: dict[str, Any], console: str) -> int | None:
+    try:
+        buying_price = float(account.get("purchase_cost") or 0)
+    except (TypeError, ValueError):
+        buying_price = 0
+    if buying_price <= 0:
+        return None
+    price = buying_price / 2
+    if console == "ps5":
+        price += 10000
+    return int(round(price))
 
 
 def _parse_json(raw: str) -> dict[str, Any]:
