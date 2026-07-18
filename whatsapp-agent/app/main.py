@@ -23,6 +23,8 @@ from app.documents import (
     has_excel_attachment,
 )
 from app.memory import ConversationMemory
+from app.psn_agent import PsnAgent
+from app.psn_store import PsnStore
 from app.whatsapp import WhatsAppClient
 
 
@@ -32,6 +34,8 @@ logger = logging.getLogger("whatsapp-agent")
 settings = get_settings()
 memory = ConversationMemory(settings.database_path)
 agent = ClaudeAgent(settings, memory)
+psn_store = PsnStore(settings)
+psn_agent = PsnAgent(settings, memory)
 whatsapp = WhatsAppClient(settings)
 
 app = FastAPI(title="WhatsApp Claude Helper", version="0.1.0")
@@ -46,7 +50,8 @@ async def health() -> dict[str, str]:
 async def debug_identity() -> dict[str, str]:
     return {
         "assistant": "Aggie",
-        "purpose": "stock-manager documents, reports, sheets, and workplace helper",
+        "mode": settings.assistant_mode,
+        "purpose": "stock-manager documents helper" if settings.assistant_mode != "psn" else "PSN sales, inventory, slots, and business tracking helper",
         "app_file": str(Path(__file__).resolve()),
     }
 
@@ -55,6 +60,7 @@ async def debug_identity() -> dict[str, str]:
 async def debug_config() -> dict[str, bool | str]:
     return {
         "assistant": "Aggie",
+        "assistant_mode": settings.assistant_mode,
         "meta_verify_token_set": bool(settings.meta_verify_token),
         "meta_access_token_set": bool(settings.meta_access_token),
         "meta_phone_number_id_set": bool(settings.meta_phone_number_id),
@@ -69,6 +75,8 @@ async def debug_config() -> dict[str, bool | str]:
             or settings.blob_read_write_token
         ),
         "blob_store_set": bool(settings.blob_read_write_token),
+        "supabase_url_set": bool(settings.supabase_url),
+        "supabase_key_set": bool(settings.supabase_service_role_key or settings.supabase_anon_key),
     }
 
 
@@ -126,6 +134,10 @@ async def _handle_message(message: dict[str, Any]) -> None:
     message_type = message.get("type")
     text = _extract_text(message)
     attachments: list[dict[str, Any]] = []
+
+    if settings.assistant_mode.lower() == "psn":
+        await _handle_psn_message(wa_id, message_type, text)
+        return
 
     if message_type in {"image", "document"}:
         media = message[message_type]
@@ -921,3 +933,65 @@ async def _send_reply_messages(wa_id: str, reply: str) -> None:
         return
     for part in parts[:2]:
         await whatsapp.send_text(wa_id, part)
+
+
+async def _handle_psn_message(wa_id: str, message_type: str | None, text: str) -> None:
+    if message_type != "text":
+        await whatsapp.send_text(
+            wa_id,
+            "Kwa sasa PSN agent inapokea text kwanza. Niambie game/account/sale unayotaka nifanyie.",
+        )
+        return
+
+    if not psn_store.configured:
+        await whatsapp.send_text(
+            wa_id,
+            "PSN agent iko ready, ila Supabase env hazijawekwa. Weka SUPABASE_URL na SUPABASE_SERVICE_ROLE_KEY kwenye Vercel.",
+        )
+        return
+
+    pending = memory.get_pending_action(wa_id)
+    if pending and _looks_like_cancel(text):
+        memory.clear_pending_action(wa_id)
+        memory.add_message(wa_id, "user", text)
+        memory.add_message(wa_id, "assistant", "Cancelled.")
+        await whatsapp.send_text(wa_id, "Sawa, nime-cancel hiyo action.")
+        return
+
+    if pending and _looks_like_confirmation(text):
+        memory.add_message(wa_id, "user", text)
+        await whatsapp.send_text(wa_id, "Sawa, naifanya sasa...")
+        try:
+            result = await psn_store.execute(str(pending["action"]), pending.get("params") or {})
+            memory.clear_pending_action(wa_id)
+            memory.add_message(wa_id, "assistant", result)
+            await whatsapp.send_text(wa_id, result)
+        except Exception as exc:
+            logger.exception("PSN action failed")
+            memory.clear_pending_action(wa_id)
+            error_text = f"Imeshindikana: {exc}"
+            memory.add_message(wa_id, "assistant", error_text)
+            await whatsapp.send_text(wa_id, error_text)
+        return
+
+    try:
+        inventory = await psn_store.inventory()
+        plan = await psn_agent.plan(wa_id, text, inventory)
+    except Exception as exc:
+        logger.exception("PSN message handling failed")
+        await whatsapp.send_text(wa_id, f"Nimekwama kusoma inventory: {exc}")
+        return
+
+    if plan.get("type") == "action":
+        memory.set_pending_action(wa_id, plan)
+        await whatsapp.send_text(
+            wa_id,
+            f"{plan.get('confirm')}\n\nReply *yes/ndio/sawa* kuthibitisha, au *cancel* kuacha.",
+        )
+        return
+
+    await whatsapp.send_text(wa_id, str(plan.get("text") or "Nimekupata."))
+
+
+def _looks_like_cancel(text: str) -> bool:
+    return text.strip().lower() in {"cancel", "stop", "acha", "hapana", "no", "nope", "sitaki"}

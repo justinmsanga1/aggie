@@ -12,6 +12,7 @@ Private WhatsApp assistant for a stock manager. It receives WhatsApp messages fr
 - Media download from Meta for images and documents
 - Basic extraction for PDF, DOCX, XLSX, CSV, TXT/MD
 - Image forwarding to Claude vision-capable models
+- Optional PSN sales-agent mode with Supabase inventory actions
 
 ## Setup
 
@@ -95,6 +96,16 @@ UPLOAD_DIR=/tmp/uploads
 OUTPUT_DIR=/tmp/outputs
 KNOWLEDGE_DIR=./knowledge
 ```
+
+For the PSN WhatsApp sales agent, keep the same Meta and Claude keys, then add:
+
+```text
+ASSISTANT_MODE=psn
+SUPABASE_URL=...
+SUPABASE_SERVICE_ROLE_KEY=...
+```
+
+In PSN mode, WhatsApp text goes to the sales/inventory agent instead of Aggie document mode. Mutating actions such as selling a slot, adding an account, deleting an account, deposits, and deactivation are saved only after the user replies `yes`, `ndio`, or `sawa`.
 
 Then set Meta callback URL to:
 

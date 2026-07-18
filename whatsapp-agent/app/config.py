@@ -7,6 +7,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    assistant_mode: str = Field(default="aggie", alias="ASSISTANT_MODE")
     meta_verify_token: str = Field(default="", alias="META_VERIFY_TOKEN")
     meta_access_token: str = Field(default="", alias="META_ACCESS_TOKEN")
     meta_phone_number_id: str = Field(default="", alias="META_PHONE_NUMBER_ID")
@@ -27,6 +28,9 @@ class Settings(BaseSettings):
     upstash_redis_rest_url: str = Field(default="", alias="UPSTASH_REDIS_REST_URL")
     upstash_redis_rest_token: str = Field(default="", alias="UPSTASH_REDIS_REST_TOKEN")
     blob_read_write_token: str = Field(default="", alias="BLOB_READ_WRITE_TOKEN")
+    supabase_url: str = Field(default="", alias="SUPABASE_URL")
+    supabase_service_role_key: str = Field(default="", alias="SUPABASE_SERVICE_ROLE_KEY")
+    supabase_anon_key: str = Field(default="", alias="SUPABASE_ANON_KEY")
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

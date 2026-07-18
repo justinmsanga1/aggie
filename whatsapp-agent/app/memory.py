@@ -90,6 +90,15 @@ class ConversationMemory:
             )
             conn.execute(
                 """
+                CREATE TABLE IF NOT EXISTS pending_actions (
+                    wa_id TEXT PRIMARY KEY,
+                    action_json TEXT NOT NULL,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS document_jobs (
                     job_id TEXT PRIMARY KEY,
                     wa_id TEXT NOT NULL,
@@ -321,6 +330,48 @@ class ConversationMemory:
         blob_store.delete(_blob_key(f"pending_instruction:{wa_id}"))
         with self._connect() as conn:
             conn.execute("DELETE FROM pending_instructions WHERE wa_id = ?", (wa_id,))
+
+    def set_pending_action(self, wa_id: str, action: dict[str, Any]) -> None:
+        payload = {"action": action}
+        if _set_persistent(f"pending_action:{wa_id}", payload, ttl_seconds=86400):
+            return
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO pending_actions (wa_id, action_json, created_at)
+                VALUES (?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(wa_id) DO UPDATE SET
+                    action_json = excluded.action_json,
+                    created_at = CURRENT_TIMESTAMP
+                """,
+                (wa_id, json.dumps(action)),
+            )
+
+    def get_pending_action(self, wa_id: str) -> dict[str, Any] | None:
+        value = _get_persistent(f"pending_action:{wa_id}")
+        if value and isinstance(value.get("action"), dict):
+            return value["action"]
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT action_json FROM pending_actions
+                WHERE wa_id = ?
+                """,
+                (wa_id,),
+            ).fetchone()
+        if not row:
+            return None
+        try:
+            value = json.loads(row[0])
+            return value if isinstance(value, dict) else None
+        except json.JSONDecodeError:
+            return None
+
+    def clear_pending_action(self, wa_id: str) -> None:
+        _redis_delete(f"pending_action:{wa_id}")
+        blob_store.delete(_blob_key(f"pending_action:{wa_id}"))
+        with self._connect() as conn:
+            conn.execute("DELETE FROM pending_actions WHERE wa_id = ?", (wa_id,))
 
     def create_document_job(
         self,
