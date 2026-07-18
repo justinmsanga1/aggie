@@ -131,7 +131,10 @@ def _customer_rules() -> str:
 - Never reveal account emails, passwords, purchase costs, PSN deposits, profit, internal notes, reset-cycle details, or supplier/admin data.
 - Do not output action JSON in customer mode. Only answer or ask one sales question.
 - Help the customer choose a game and console. Ask PS4 or PS5 when unclear.
-- If a game exists with available slots, say it is available and ask what console they need or whether they want to order.
+- If a game exists with available slots, say it is available and mention 1-3 available packages that include that game.
+- A package is a safe public bundle from one account: show package label, games included, and PS4/PS5 availability. Never show account email or internal account id.
+- When customer asks "do you have X", scan packages for packages whose games include X or close spelling matches. Prefer packages with the requested console available.
+- If several packages include the game, present the best 2-3 in short lines, then ask which one they want.
 - If unavailable, politely offer alternatives from the game list.
 - Do not ask the customer to confirm a backend action. Ask normal sales questions like "PS4 au PS5?" or "Unahitaji game gani?"
 - Keep the tone friendly, confident, and sales-focused."""
@@ -178,7 +181,8 @@ def _compact_inventory(inventory: dict[str, Any], role: str = "admin") -> dict[s
 
 def _customer_inventory(inventory: dict[str, Any]) -> dict[str, Any]:
     games: dict[str, dict[str, Any]] = {}
-    for account in inventory.get("accounts", []):
+    packages = []
+    for index, account in enumerate(inventory.get("accounts", []), start=1):
         account_games = [g.get("name") for g in account.get("games", []) if g.get("name")]
         available = {
             "ps4": any(s.get("console") == "ps4" and s.get("status") == "available" for s in account.get("slots", [])),
@@ -188,7 +192,19 @@ def _customer_inventory(inventory: dict[str, Any]) -> dict[str, Any]:
             item = games.setdefault(game_name, {"name": game_name, "ps4_available": False, "ps5_available": False})
             item["ps4_available"] = item["ps4_available"] or available["ps4"]
             item["ps5_available"] = item["ps5_available"] or available["ps5"]
-    return {"games": sorted(games.values(), key=lambda item: item["name"])[:120]}
+        if account_games and (available["ps4"] or available["ps5"]):
+            packages.append(
+                {
+                    "label": f"Package {len(packages) + 1}",
+                    "games": account_games[:8],
+                    "ps4_available": available["ps4"],
+                    "ps5_available": available["ps5"],
+                }
+            )
+    return {
+        "games": sorted(games.values(), key=lambda item: item["name"])[:120],
+        "packages": packages[:80],
+    }
 
 
 def _parse_json(raw: str) -> dict[str, Any]:
