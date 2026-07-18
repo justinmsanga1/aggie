@@ -996,6 +996,12 @@ async def _handle_psn_message(wa_id: str, message_type: str | None, text: str) -
         await whatsapp.send_text(wa_id, f"Nimekwama kusoma inventory: {exc}")
         return
 
+    if role == "customer" and plan.get("type") == "action":
+        text_reply = _customer_action_to_reply(plan)
+        memory.add_message(wa_id, "assistant", text_reply)
+        await whatsapp.send_text(wa_id, text_reply)
+        return
+
     if plan.get("type") == "action":
         memory.set_pending_action(wa_id, plan)
         await whatsapp.send_text(
@@ -1020,6 +1026,9 @@ def _psn_role_switch(text: str) -> str:
         "customer",
         "as customer",
         "buyer mode",
+        "mteja",
+        "mteja mode",
+        "kama mteja",
     }:
         return "customer"
     if lowered in {
@@ -1032,6 +1041,15 @@ def _psn_role_switch(text: str) -> str:
     }:
         return "admin"
     return ""
+
+
+def _customer_action_to_reply(plan: dict[str, Any]) -> str:
+    params = plan.get("params") if isinstance(plan.get("params"), dict) else {}
+    game = params.get("game") or params.get("game_name") or "hiyo game"
+    console = str(params.get("console") or "").upper()
+    if console in {"PS4", "PS5"}:
+        return f"Ipo {console} kwa {game}. Unataka nikusaidie kuendelea na order?"
+    return f"Ipo kwa {game}. Unahitaji PS4 au PS5?"
 
 
 def _current_psn_role(wa_id: str) -> str:

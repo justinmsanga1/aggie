@@ -56,6 +56,7 @@ def _system_prompt(inventory: dict[str, Any], role: str = "admin") -> str:
     role = "customer" if role == "customer" else "admin"
     compact = _compact_inventory(inventory, role)
     role_rules = _customer_rules() if role == "customer" else _admin_rules()
+    response_shapes = _customer_response_shapes() if role == "customer" else _admin_response_shapes()
     return f"""You are a WhatsApp PSN sales and inventory assistant for a PSN account reselling business.
 
 CURRENT CHAT ROLE: {role.upper()}
@@ -81,23 +82,7 @@ BUSINESS RULES:
 OUTPUT ONLY VALID JSON. No markdown, no extra text.
 
 RESPONSE SHAPES:
-1. Read or analysis:
-{{"type":"answer","text":"short useful answer"}}
-
-2. Need one more detail:
-{{"type":"gathering","text":"short question","field":"field_name"}}
-
-3. Write action requiring WhatsApp confirmation:
-{{"type":"action","action":"sell_slot","params":{{"game":"FIFA 25","console":"PS5","email":"account@example.com","price":30000,"customer":"optional"}},"confirm":"Confirm kuuza FIFA 25 PS5 kwa account@example.com kwa TZS 30,000?"}}
-
-SUPPORTED ACTIONS:
-- add_account params: email, password, region, games array, purchase_cost, notes
-- sell_slot params: game, console, email/account_id if known, price, customer, note
-- update_account params: email/account_id, fields object
-- delete_account params: email/account_id
-- mark_deactivated params: email/account_id
-- record_psn_deposit params: email/account_id, amount, note
-- record_game_purchase params: email/account_id, game, amount
+{response_shapes}
 
 WHEN USER ASKS REPORTS:
 - Answer directly with summary from live data. Do not create an action.
@@ -111,6 +96,36 @@ def _admin_rules() -> str:
     return "- Mutating actions must be returned as JSON action objects for backend confirmation. Do not say an action is done until backend confirms."
 
 
+def _admin_response_shapes() -> str:
+    return """1. Read or analysis:
+{"type":"answer","text":"short useful answer"}
+
+2. Need one more detail:
+{"type":"gathering","text":"short question","field":"field_name"}
+
+3. Write action requiring WhatsApp confirmation:
+{"type":"action","action":"sell_slot","params":{"game":"FIFA 25","console":"PS5","email":"account@example.com","price":30000,"customer":"optional"},"confirm":"Confirm kuuza FIFA 25 PS5 kwa account@example.com kwa TZS 30,000?"}
+
+SUPPORTED ACTIONS:
+- add_account params: email, password, region, games array, purchase_cost, notes
+- sell_slot params: game, console, email/account_id if known, price, customer, note
+- update_account params: email/account_id, fields object
+- delete_account params: email/account_id
+- mark_deactivated params: email/account_id
+- record_psn_deposit params: email/account_id, amount, note
+- record_game_purchase params: email/account_id, game, amount"""
+
+
+def _customer_response_shapes() -> str:
+    return """1. Sales answer:
+{"type":"answer","text":"short customer-facing reply"}
+
+2. Need one more customer detail:
+{"type":"gathering","text":"short customer-facing question","field":"game_or_console"}
+
+Customer mode has no backend action response."""
+
+
 def _customer_rules() -> str:
     return """- You are speaking to a CUSTOMER, not an admin.
 - Never reveal account emails, passwords, purchase costs, PSN deposits, profit, internal notes, reset-cycle details, or supplier/admin data.
@@ -118,6 +133,7 @@ def _customer_rules() -> str:
 - Help the customer choose a game and console. Ask PS4 or PS5 when unclear.
 - If a game exists with available slots, say it is available and ask what console they need or whether they want to order.
 - If unavailable, politely offer alternatives from the game list.
+- Do not ask the customer to confirm a backend action. Ask normal sales questions like "PS4 au PS5?" or "Unahitaji game gani?"
 - Keep the tone friendly, confident, and sales-focused."""
 
 
