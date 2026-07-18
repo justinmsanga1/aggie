@@ -18,13 +18,19 @@ class PsnAgent:
         self.memory = memory
         self.client = AsyncAnthropic(api_key=settings.anthropic_api_key) if settings.anthropic_api_key else None
 
-    async def plan(self, wa_id: str, user_text: str, inventory: dict[str, Any]) -> dict[str, Any]:
+    async def plan(
+        self,
+        wa_id: str,
+        user_text: str,
+        inventory: dict[str, Any],
+        role: str = "admin",
+    ) -> dict[str, Any]:
         if not self.client:
             return {"type": "answer", "text": "Claude API key haijawekwa kwenye server bado."}
 
         self.memory.add_message(wa_id, "user", user_text)
         history = self.memory.recent_messages(wa_id, self.settings.max_history_messages)
-        prompt = _system_prompt(inventory)
+        prompt = _system_prompt(inventory, role)
         try:
             response = await self.client.messages.create(
                 model=self.settings.claude_model,
@@ -46,9 +52,13 @@ class PsnAgent:
         return planned
 
 
-def _system_prompt(inventory: dict[str, Any]) -> str:
-    compact = _compact_inventory(inventory)
+def _system_prompt(inventory: dict[str, Any], role: str = "admin") -> str:
+    role = "customer" if role == "customer" else "admin"
+    compact = _compact_inventory(inventory, role)
+    role_rules = _customer_rules() if role == "customer" else _admin_rules()
     return f"""You are a WhatsApp PSN sales and inventory assistant for a PSN account reselling business.
+
+CURRENT CHAT ROLE: {role.upper()}
 
 STYLE:
 - Speak like a helpful human assistant, not a corporate AI.
@@ -66,7 +76,7 @@ BUSINESS RULES:
 - For selling a slot, required info is: game, console PS4/PS5, sale price. Account/email is required only if multiple matching accounts are possible.
 - Suggest normal slots first. Use reset slots only when no normal slot is available.
 - If reset slot is locked or no slot is available, say so clearly.
-- Mutating actions must be returned as JSON action objects for backend confirmation. Do not say an action is done until backend confirms.
+{role_rules}
 
 OUTPUT ONLY VALID JSON. No markdown, no extra text.
 
@@ -97,7 +107,23 @@ WHEN MULTIPLE MATCHES:
 """
 
 
-def _compact_inventory(inventory: dict[str, Any]) -> dict[str, Any]:
+def _admin_rules() -> str:
+    return "- Mutating actions must be returned as JSON action objects for backend confirmation. Do not say an action is done until backend confirms."
+
+
+def _customer_rules() -> str:
+    return """- You are speaking to a CUSTOMER, not an admin.
+- Never reveal account emails, passwords, purchase costs, PSN deposits, profit, internal notes, reset-cycle details, or supplier/admin data.
+- Do not output action JSON in customer mode. Only answer or ask one sales question.
+- Help the customer choose a game and console. Ask PS4 or PS5 when unclear.
+- If a game exists with available slots, say it is available and ask what console they need or whether they want to order.
+- If unavailable, politely offer alternatives from the game list.
+- Keep the tone friendly, confident, and sales-focused."""
+
+
+def _compact_inventory(inventory: dict[str, Any], role: str = "admin") -> dict[str, Any]:
+    if role == "customer":
+        return _customer_inventory(inventory)
     accounts = []
     for account in inventory.get("accounts", [])[:80]:
         games = [g.get("name") for g in account.get("games", []) if g.get("name")]
@@ -132,6 +158,21 @@ def _compact_inventory(inventory: dict[str, Any]) -> dict[str, Any]:
         "accounts": accounts,
         "games": [{"id": g.get("id"), "name": g.get("name")} for g in inventory.get("games", [])[:120]],
     }
+
+
+def _customer_inventory(inventory: dict[str, Any]) -> dict[str, Any]:
+    games: dict[str, dict[str, Any]] = {}
+    for account in inventory.get("accounts", []):
+        account_games = [g.get("name") for g in account.get("games", []) if g.get("name")]
+        available = {
+            "ps4": any(s.get("console") == "ps4" and s.get("status") == "available" for s in account.get("slots", [])),
+            "ps5": any(s.get("console") == "ps5" and s.get("status") == "available" for s in account.get("slots", [])),
+        }
+        for game_name in account_games:
+            item = games.setdefault(game_name, {"name": game_name, "ps4_available": False, "ps5_available": False})
+            item["ps4_available"] = item["ps4_available"] or available["ps4"]
+            item["ps5_available"] = item["ps5_available"] or available["ps5"]
+    return {"games": sorted(games.values(), key=lambda item: item["name"])[:120]}
 
 
 def _parse_json(raw: str) -> dict[str, Any]:

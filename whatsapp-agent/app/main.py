@@ -950,6 +950,19 @@ async def _handle_psn_message(wa_id: str, message_type: str | None, text: str) -
         )
         return
 
+    role_switch = _psn_role_switch(text)
+    if role_switch:
+        memory.clear_pending_action(wa_id)
+        memory.set_preferences(wa_id, f"psn_role={role_switch}")
+        memory.add_message(wa_id, "user", text)
+        if role_switch == "customer":
+            reply = "Sawa, nime-switch customer mode. Niulize kama customer: game gani ipo, bei, PS4/PS5, au order."
+        else:
+            reply = "Sawa, nimerudi admin mode. Sasa unaweza kuniambia niuze slot, niongeze account, au nitoe report."
+        memory.add_message(wa_id, "assistant", reply)
+        await whatsapp.send_text(wa_id, reply)
+        return
+
     pending = memory.get_pending_action(wa_id)
     if pending and _looks_like_cancel(text):
         memory.clear_pending_action(wa_id)
@@ -975,8 +988,9 @@ async def _handle_psn_message(wa_id: str, message_type: str | None, text: str) -
         return
 
     try:
+        role = _current_psn_role(wa_id)
         inventory = await psn_store.inventory()
-        plan = await psn_agent.plan(wa_id, text, inventory)
+        plan = await psn_agent.plan(wa_id, text, inventory, role=role)
     except Exception as exc:
         logger.exception("PSN message handling failed")
         await whatsapp.send_text(wa_id, f"Nimekwama kusoma inventory: {exc}")
@@ -995,3 +1009,37 @@ async def _handle_psn_message(wa_id: str, message_type: str | None, text: str) -
 
 def _looks_like_cancel(text: str) -> bool:
     return text.strip().lower() in {"cancel", "stop", "acha", "hapana", "no", "nope", "sitaki"}
+
+
+def _psn_role_switch(text: str) -> str:
+    lowered = text.strip().lower()
+    if lowered in {
+        "customer mode",
+        "switch customer",
+        "switch to customer",
+        "customer",
+        "as customer",
+        "buyer mode",
+    }:
+        return "customer"
+    if lowered in {
+        "admin mode",
+        "switch admin",
+        "switch to admin",
+        "admin",
+        "as admin",
+        "seller mode",
+    }:
+        return "admin"
+    return ""
+
+
+def _current_psn_role(wa_id: str) -> str:
+    prefs = memory.get_preferences(wa_id)
+    for raw_line in prefs.splitlines():
+        line = raw_line.strip().lower()
+        if line == "psn_role=customer":
+            return "customer"
+        if line == "psn_role=admin":
+            return "admin"
+    return "admin"
