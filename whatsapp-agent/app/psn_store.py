@@ -21,12 +21,13 @@ class PsnStore:
 
     async def inventory(self) -> dict[str, Any]:
         self._require_config()
-        accounts, games, account_games, slots, transactions = await self._gather(
+        accounts, games, account_games, slots, transactions, package_logs = await self._gather(
             self._get("accounts", "select=*"),
             self._get("games", "select=*"),
             self._get("account_games", "select=*"),
             self._get("slots", "select=*"),
             self._get("money_transactions", "select=*&order=created_at.desc&limit=200"),
+            self._get("activity_log", "select=*&action=eq.psn_package_save&entity_type=eq.package&order=created_at.desc&limit=80"),
         )
         game_by_id = {g["id"]: g for g in games}
         games_by_account: dict[str, list[dict[str, Any]]] = {}
@@ -49,12 +50,18 @@ class PsnStore:
                     ),
                 }
             )
-        return {"accounts": account_rows, "games": games, "transactions": transactions}
+        return {
+            "accounts": account_rows,
+            "games": games,
+            "transactions": transactions,
+            "packages": _packages_from_activity(package_logs),
+        }
 
     async def execute(self, action: str, params: dict[str, Any]) -> str:
         handlers = {
             "add_account": self.add_account,
             "sell_slot": self.sell_slot,
+            "save_packages": self.save_packages,
             "update_account": self.update_account,
             "delete_account": self.delete_account,
             "mark_deactivated": self.mark_deactivated,
@@ -65,6 +72,44 @@ class PsnStore:
         if not handler:
             raise ValueError(f"Unsupported PSN action: {action}")
         return await handler(params)
+
+    async def save_packages(self, params: dict[str, Any]) -> str:
+        raw_packages = params.get("packages")
+        if isinstance(raw_packages, dict):
+            raw_packages = [raw_packages]
+        if not isinstance(raw_packages, list):
+            raise ValueError("Packages zinahitajika kama list.")
+
+        saved = 0
+        for index, raw_package in enumerate(raw_packages, start=1):
+            if not isinstance(raw_package, dict):
+                continue
+            games = [_clean(game) for game in raw_package.get("games", []) if _clean(game)]
+            if not games:
+                continue
+            label = _clean(raw_package.get("label") or raw_package.get("name") or f"Package {index}")
+            metadata = {
+                "label": label,
+                "games": games[:20],
+                "ps4_price": _optional_money(raw_package.get("ps4_price", raw_package.get("ps4Price"))),
+                "ps5_price": _optional_money(raw_package.get("ps5_price", raw_package.get("ps5Price"))),
+                "price": _optional_money(raw_package.get("price")),
+                "notes": _clean(raw_package.get("notes") or raw_package.get("description")),
+                "source": _clean(params.get("source_text") or params.get("source") or ""),
+            }
+            await self._post(
+                "activity_log",
+                {
+                    "actor": _clean(params.get("admin")) or "WhatsApp PSN Agent",
+                    "action": "psn_package_save",
+                    "entity_type": "package",
+                    "metadata": metadata,
+                },
+            )
+            saved += 1
+        if saved <= 0:
+            raise ValueError("Sijapata package yenye games za ku-save.")
+        return f"Done. Nime-save package {saved} kwenye Supabase kwa customer reference."
 
     async def add_account(self, params: dict[str, Any]) -> str:
         email = _clean(params.get("email"))
@@ -387,6 +432,39 @@ def _money(value: Any) -> float:
         return float(str(value or 0).replace(",", "").replace("TZS", "").replace("TSh", "").strip())
     except ValueError:
         return 0.0
+
+
+def _optional_money(value: Any) -> float | None:
+    amount = _money(value)
+    return amount if amount > 0 else None
+
+
+def _packages_from_activity(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    packages = []
+    seen: set[tuple[str, tuple[str, ...]]] = set()
+    for row in rows:
+        metadata = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
+        games = [_clean(game) for game in metadata.get("games", []) if _clean(game)]
+        if not games:
+            continue
+        label = _clean(metadata.get("label")) or f"Package {len(packages) + 1}"
+        key = (label.lower(), tuple(game.lower() for game in games))
+        if key in seen:
+            continue
+        seen.add(key)
+        packages.append(
+            {
+                "label": label,
+                "games": games[:20],
+                "ps4_price": _optional_money(metadata.get("ps4_price")),
+                "ps5_price": _optional_money(metadata.get("ps5_price")),
+                "price": _optional_money(metadata.get("price")),
+                "notes": _clean(metadata.get("notes")),
+                "created_at": row.get("created_at"),
+                "source": "saved",
+            }
+        )
+    return packages
 
 
 def _slot_number(slot: dict[str, Any]) -> int:
