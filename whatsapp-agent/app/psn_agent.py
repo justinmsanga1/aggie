@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any
 
 from anthropic import AsyncAnthropic
@@ -26,7 +27,7 @@ class PsnAgent:
         role: str = "admin",
     ) -> dict[str, Any]:
         if not self.client:
-            return {"type": "answer", "text": "Claude API key haijawekwa kwenye server bado."}
+            return _fallback_plan(user_text, inventory, role, "Claude API key haijawekwa kwenye server bado.")
 
         self.memory.add_message(wa_id, "user", user_text)
         history = self.memory.recent_messages(wa_id, self.settings.max_history_messages)
@@ -45,11 +46,31 @@ class PsnAgent:
             planned = _parse_json(raw)
         except Exception as exc:
             logger.exception("Claude PSN planning failed")
-            planned = {"type": "answer", "text": f"Nimekwama kidogo kusoma request hii: {exc}"}
+            planned = _fallback_plan(user_text, inventory, role, str(exc))
 
         planned = _normalize_plan(planned)
         self.memory.add_message(wa_id, "assistant", _conversation_text(planned))
         return planned
+
+
+def _fallback_plan(user_text: str, inventory: dict[str, Any], role: str, error: str = "") -> dict[str, Any]:
+    if role == "customer":
+        return {"type": "answer", "text": _fallback_customer_reply(user_text, inventory)}
+
+    package_plan = _fallback_package_plan(user_text)
+    if package_plan:
+        return package_plan
+
+    lowered_error = error.lower()
+    if "credit balance is too low" in lowered_error or "billing" in lowered_error:
+        return {
+            "type": "answer",
+            "text": "Claude credits zimeisha, kwa hiyo naweza kufanya basic package/customer lookup tu kwa sasa. Ongeza Anthropic credits ili nirudi full smart mode.",
+        }
+    return {
+        "type": "answer",
+        "text": "Nimekwama kutumia Claude kwa sasa. Naweza bado ku-save package list au kujibu customer basic game/package questions.",
+    }
 
 
 def _system_prompt(inventory: dict[str, Any], role: str = "admin") -> str:
@@ -259,6 +280,188 @@ def _customer_inventory(inventory: dict[str, Any]) -> dict[str, Any]:
         "games": sorted(games.values(), key=lambda item: item["name"])[:120],
         "packages": packages[:80],
     }
+
+
+def _fallback_package_plan(user_text: str) -> dict[str, Any] | None:
+    if not _looks_like_package_text(user_text):
+        return None
+    package_blocks = _split_package_blocks(user_text)
+    packages = []
+    for index, block in enumerate(package_blocks, start=1):
+        games = _extract_games_from_package(block)
+        if not games:
+            continue
+        ps4_price = _extract_labeled_price(block, "ps4")
+        ps5_price = _extract_labeled_price(block, "ps5")
+        shared_price = None if ps4_price or ps5_price else _extract_any_price(block)
+        label = _extract_package_label(block, index, games)
+        packages.append(
+            {
+                "label": label,
+                "games": games,
+                "ps4_price": ps4_price,
+                "ps5_price": ps5_price,
+                "price": shared_price,
+                "notes": _short_package_notes(block),
+            }
+        )
+    if not packages:
+        return None
+    return {
+        "type": "action",
+        "action": "save_packages",
+        "params": {"source_text": user_text, "packages": packages},
+        "confirm": f"Confirm ni-save package {len(packages)} kwa customer reference?",
+    }
+
+
+def _looks_like_package_text(text: str) -> bool:
+    lowered = text.lower()
+    package_words = ["package", "packages", "bundle", "combo", "mzigo", "offer", "ofaa"]
+    price_or_console = ["ps4", "ps5", "bei", "price", "tzs", "tsh"]
+    return any(word in lowered for word in package_words) and any(word in lowered for word in price_or_console)
+
+
+def _split_package_blocks(text: str) -> list[str]:
+    blocks: list[str] = []
+    current: list[str] = []
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        starts_package = bool(re.search(r"^(package|bundle|combo|mzigo)\b", line, re.IGNORECASE))
+        if starts_package and current:
+            blocks.append("\n".join(current))
+            current = []
+        current.append(line)
+    if current:
+        blocks.append("\n".join(current))
+    return blocks or [text]
+
+
+def _extract_games_from_package(text: str) -> list[str]:
+    cleaned_lines = []
+    for raw_line in text.splitlines():
+        lowered_line = raw_line.lower()
+        if any(word in lowered_line for word in ["hot", "offer", "discount", "ofa", "promo"]) and not re.search(r"\+|,|;|\||/", raw_line):
+            continue
+        line = re.sub(r"\b(ps4|ps5)\b[^,\n;|]*\d[\d,\.]*", "", raw_line, flags=re.IGNORECASE)
+        line = re.sub(r"\b(tzs|tsh|bei|price)\b[:\s-]*\d[\d,\.]*", "", line, flags=re.IGNORECASE)
+        cleaned_lines.append(line)
+    cleaned = " ".join(cleaned_lines)
+    cleaned = re.sub(r"\b(package|packages|bundle|combo|mzigo|ya leo|leo|hot|offer)\b[:\s-]*", " ", cleaned, flags=re.IGNORECASE)
+    parts = re.split(r"\s*(?:\+|,|;|\||/|\band\b|\bna\b)\s*", cleaned, flags=re.IGNORECASE)
+    games = []
+    for part in parts:
+        game = re.sub(r"^\d+[\).\-\s]+", "", part).strip(" -:")
+        game = re.sub(r"\s{2,}", " ", game).strip()
+        if not game or len(game) < 2:
+            continue
+        if re.fullmatch(r"\d[\d,\.]*", game):
+            continue
+        if game.lower() in {"ps4", "ps5", "price", "bei", "tzs", "tsh"}:
+            continue
+        games.append(game[:80])
+    return _unique_keep_order(games)[:20]
+
+
+def _extract_labeled_price(text: str, console: str) -> int | None:
+    match = re.search(rf"\b{console}\b[^\d]{{0,20}}(\d[\d,\.]*)", text, re.IGNORECASE)
+    if not match:
+        return None
+    return _optional_int(match.group(1))
+
+
+def _extract_any_price(text: str) -> int | None:
+    matches = re.findall(r"(?:tzs|tsh|bei|price)?\s*(\d[\d,\.]{3,})", text, re.IGNORECASE)
+    if not matches:
+        return None
+    return _optional_int(matches[-1])
+
+
+def _extract_package_label(text: str, index: int, games: list[str]) -> str:
+    first_line = next((line.strip(" -:") for line in text.splitlines() if line.strip()), "")
+    if re.search(r"\b(package|bundle|combo|mzigo)\b", first_line, re.IGNORECASE) and len(first_line) <= 60:
+        return first_line
+    if games:
+        return f"{games[0]} Package"
+    return f"Package {index}"
+
+
+def _short_package_notes(text: str) -> str:
+    notes = []
+    for line in text.splitlines():
+        lowered = line.lower()
+        if any(word in lowered for word in ["hot", "offer", "discount", "ofa", "promo"]):
+            notes.append(line.strip())
+    return " | ".join(notes)[:180]
+
+
+def _fallback_customer_reply(user_text: str, inventory: dict[str, Any]) -> str:
+    public_inventory = _customer_inventory(inventory)
+    query = _best_game_query(user_text, public_inventory)
+    matches = _matching_packages(query, public_inventory.get("packages", [])) if query else []
+    if matches:
+        game_name = query.upper() if len(query) <= 4 else query.title()
+        package_lines = [_format_package_line(package) for package in matches[:3]]
+        return f"{game_name} ipo. Package nzuri hizi:\n" + "\n".join(package_lines) + "\nUnatumia PS4 au PS5?"
+
+    alternatives = public_inventory.get("packages", [])[:3]
+    if alternatives:
+        lines = [_format_package_line(package) for package in alternatives]
+        return "Hiyo game sijaiona kwa sasa, ila nina options nzuri hizi:\n" + "\n".join(lines) + "\nNikushikie ipi?"
+    return "Kwa sasa sijaona package available kwenye system. Niambie game unayotaka nicheki tena."
+
+
+def _best_game_query(user_text: str, public_inventory: dict[str, Any]) -> str:
+    lowered = user_text.lower()
+    game_names = [str(game.get("name") or "") for game in public_inventory.get("games", [])]
+    for game_name in sorted(game_names, key=len, reverse=True):
+        if game_name and game_name.lower() in lowered:
+            return game_name
+    words = [
+        word
+        for word in re.findall(r"[a-zA-Z0-9]{3,}", lowered)
+        if word not in {"ipo", "una", "unayo", "game", "bei", "price", "ps4", "ps5", "have", "do", "you", "need", "nataka"}
+    ]
+    return " ".join(words[:3]).strip()
+
+
+def _matching_packages(query: str, packages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    lowered = query.lower()
+    matches = []
+    for package in packages:
+        games = [str(game) for game in package.get("games", [])]
+        haystack = " ".join(games).lower()
+        if lowered and (lowered in haystack or any(part in haystack for part in lowered.split())):
+            matches.append(package)
+    return matches
+
+
+def _format_package_line(package: dict[str, Any]) -> str:
+    label = str(package.get("label") or "Package").strip()
+    games = ", ".join(str(game) for game in package.get("games", [])[:4])
+    price_bits = []
+    if package.get("ps4_price"):
+        price_bits.append(f"PS4 {int(package['ps4_price']):,}")
+    if package.get("ps5_price"):
+        price_bits.append(f"PS5 {int(package['ps5_price']):,}")
+    if package.get("price") and not price_bits:
+        price_bits.append(f"TZS {int(package['price']):,}")
+    prices = " | ".join(price_bits)
+    return f"- {label}: {games}" + (f" ({prices})" if prices else "")
+
+
+def _unique_keep_order(values: list[str]) -> list[str]:
+    seen = set()
+    result = []
+    for value in values:
+        key = value.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(value)
+    return result
 
 
 def _public_saved_package(saved_package: dict[str, Any], index: int) -> dict[str, Any] | None:
